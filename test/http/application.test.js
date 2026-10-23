@@ -127,14 +127,28 @@ it("sends per-viewer SSE snapshots and supports opaque cursor recovery", async (
   const retryData = new TextDecoder().decode((await retryReader.read()).value);
   assert.match(retryData, /two/);
   const latestCursor = /id: ([^\n]+)/.exec(retryData)[1];
+  await retryReader.cancel();
+  await new Promise((resolve) => setTimeout(resolve, 10));
   const unchanged = await fetch(f.base + `/api/rooms/ABCDE/events?cursor=${latestCursor}`, { headers: { Authorization: "Bearer token" } });
   const unchangedReader = unchanged.body.getReader();
   assert.equal(new TextDecoder().decode((await unchangedReader.read()).value), ": connected\n\n");
   await unchangedReader.cancel();
-  await retryReader.cancel();
   f.fail(Object.assign(new Error("gone"), { code: "ROOM_NOT_FOUND" }));
   f.app.poll();
   await reader.cancel();
+});
+
+it("limits authenticated SSE fan-out instead of allocating unbounded streams", async (t) => {
+  const f = await fixture(t, { maxStreams: 2 });
+  const url = f.base + "/api/rooms/ABCDE/events";
+  const headers = { Authorization: "Bearer token" };
+  const first = await fetch(url, { headers });
+  const second = await fetch(url, { headers });
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal((await fetch(url, { headers })).status, 429);
+  await first.body.cancel();
+  await second.body.cancel();
 });
 
 it("expires sessions and launches with explicit local configuration", async (t) => {
@@ -178,10 +192,15 @@ it("bounds visitor sessions and recovers expired SSE cursors", async (t) => {
 });
 
 it("starts the public launcher with a real room service and environment configuration", async () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const directory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "wuyin-launcher-"));
   const previousPort = process.env.PORT;
   const previousHost = process.env.HOST;
+  const previousData = process.env.DATA_FILE;
   process.env.PORT = "0";
   process.env.HOST = "127.0.0.1";
+  process.env.DATA_FILE = path.join(directory, "state.sqlite");
   const launcher = require("../../server");
   const app = launcher.start();
   await new Promise((resolve) => app.server.once("listening", resolve));
@@ -197,6 +216,8 @@ it("starts the public launcher with a real room service and environment configur
   await app.stop();
   if (previousPort === undefined) delete process.env.PORT; else process.env.PORT = previousPort;
   if (previousHost === undefined) delete process.env.HOST; else process.env.HOST = previousHost;
+  if (previousData === undefined) delete process.env.DATA_FILE; else process.env.DATA_FILE = previousData;
+  fs.rmSync(directory, { recursive: true });
 });
 
 it("closes slow SSE consumers and reports unexpected disconnect errors", async (t) => {

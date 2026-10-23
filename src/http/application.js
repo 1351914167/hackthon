@@ -52,7 +52,9 @@ function createApplication(options = {}) {
   const sessions = new Map();
   const viewers = new Map();
   const clients = new Set();
+  const metrics = { requests: 0, errors: 0, startedAt: clock() };
   const sessionTTL = 24 * 60 * 60 * 1000;
+  const extension = options.extension || require("../features").createFeatureRoutes({ rooms, clock });
 
   function json(response, status, value, extra = {}) {
     response.writeHead(status, { ...HEADERS, "Content-Type": "application/json; charset=utf-8", ...extra });
@@ -115,6 +117,7 @@ function createApplication(options = {}) {
   }
 
   const server = http.createServer(async (request, response) => {
+    metrics.requests += 1;
     const requestId = randomUUID();
     try {
       const url = new URL(request.url, "http://localhost");
@@ -129,7 +132,8 @@ function createApplication(options = {}) {
         }
       }
       if (url.pathname === "/api/health" && request.method === "GET") {
-        json(response, 200, { status: "ok", version: "0.1.0" });
+        json(response, 200, { status: "ok", version: "0.1.0", uptimeMs: Math.max(0, clock() - metrics.startedAt),
+          requests: metrics.requests, errors: metrics.errors, streams: clients.size });
         return;
       }
       if (url.pathname === "/api/session" && request.method === "POST") {
@@ -141,7 +145,7 @@ function createApplication(options = {}) {
         });
         return;
       }
-      if (options.extension && await options.extension({ request, response, url, rooms, token, json, readBody, readJson })) return;
+      if (await extension({ request, response, url, rooms, token, json, readBody, readJson })) return;
       if (url.pathname === "/api/rooms" && request.method === "POST") {
         const sessionId = session(request);
         const input = await readJson(request);
@@ -158,6 +162,10 @@ function createApplication(options = {}) {
         }
         if (request.method === "GET" && operation === "events") {
           const seatToken = token(request);
+          const ownClients = [...clients].filter((client) => client.seatToken === seatToken);
+          if (clients.size >= (options.maxStreams || 512) || ownClients.length >= 2) {
+            throw httpError("RATE_LIMITED", 429, "实时连接数量已达上限");
+          }
           rooms.reconnect({ roomId, seatToken });
           const stream = visibleMessage(roomId, seatToken);
           response.writeHead(200, { ...HEADERS, "Content-Type": "text/event-stream", "X-Accel-Buffering": "no", Connection: "keep-alive" });
@@ -205,7 +213,7 @@ function createApplication(options = {}) {
       }
       if (["GET", "HEAD"].includes(request.method)) {
         const file = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-        if (["index.html", "styles.css", "app.js", "product.html", "product.css"].includes(file) || /^src\/client\/[a-z0-9-]+\.js$/.test(file)) {
+        if (["index.html", "styles.css", "app.js", "product.html", "product.css", "src/media/peer-client.js"].includes(file) || /^src\/client\/[a-z0-9-]+\.js$/.test(file)) {
           const data = await fs.readFile(path.join(root, file));
           const type = file.endsWith(".html") ? "text/html" : (file.endsWith(".css") ? "text/css" : "text/javascript");
           response.writeHead(200, { ...HEADERS, "Content-Type": `${type}; charset=utf-8` });
@@ -215,8 +223,10 @@ function createApplication(options = {}) {
       }
       throw httpError("NOT_FOUND", 404, "页面不存在");
     } catch (error) {
+      metrics.errors += 1;
       const status = error.statusCode || STATUS[error.code] || (error.code === "ENOENT" ? 404 : 500);
       const code = error.code === "SEQUENCE_CONFLICT" ? "VIEW_CONFLICT" : (status === 500 ? "INTERNAL_ERROR" : error.code);
+      if (status >= 500) options.onError?.({ code, status, requestId });
       if (!response.headersSent) json(response, status, { error: { code, message: status === 500 ? "服务暂不可用" : error.message,
         requestId, ...(error.latestVersion ? { latestVersion: error.latestVersion } : {}) } });
       else response.end();
@@ -224,6 +234,7 @@ function createApplication(options = {}) {
   });
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
+  server.maxConnections = 1024;
   const timer = setInterval(poll, options.pollInterval || 500);
   timer.unref();
   function stop() {

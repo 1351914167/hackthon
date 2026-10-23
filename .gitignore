@@ -5,3 +5,8 @@ artifacts/
 .env.*
 !.env.example
 .DS_Store
+data/
+*.sqlite
+*.sqlite-*
+test-results/
+playwright-report/

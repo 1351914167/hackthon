@@ -51,6 +51,12 @@ function setup(config = {}) {
     markVoice: async () => ({}),
     getRecap: async () => { if (config.recapError) throw config.recapError; return { gameId: "g1", winner: "GOOD", roles: [], votes: [], deaths: [], turningPoints: [], segments: [], marks: [] }; },
     narration: async () => { calls.push("narration"); if (config.narrationError) throw config.narrationError; return new Blob(["host"]); },
+    createReport: async (roomId, token, targetSeatId, reason) => {
+      const report = { reportId: `report-${calls.length}`, reporterSeatId: initialRoom.selfSeatId, targetSeatId, reason, createdAt: 1000 };
+      calls.push({ report });
+      return report;
+    },
+    listReports: async () => { calls.push("list-reports"); return config.reportPayload === undefined ? { reports: config.reports || [] } : config.reportPayload; },
   };
   const view = {
     bind(handler) { this.handler = handler; },
@@ -371,5 +377,61 @@ describe("client app", () => {
     await h.app.handle("toggle-live-voice");
     assert.equal(h.app.getState().liveVoice.enabled, false);
     h.app.dispose();
+  });
+
+  it("submits a controlled report and exposes report records only to the host drawer", async () => {
+    const existing = { reportId: "report-old", reporterSeatId: "s3", targetSeatId: "s2", reason: "旧举报", createdAt: 900 };
+    const h = setup({ room: room(game("DAY_SPEECH", [])), reports: [existing] });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "房主" });
+    await h.app.handle("select-seat", { seatId: "s2" });
+    await h.app.handle("report-reason", { value: "A".repeat(250) });
+    assert.equal(h.app.getState().reportReason.length, 200);
+    await h.app.handle("submit-report", { reason: "  不当发言，请房主核查  " });
+    const submitted = h.calls.find((item) => item.report)?.report;
+    assert.equal(submitted.targetSeatId, "s2");
+    assert.equal(submitted.reason, "不当发言，请房主核查");
+    assert.equal(h.app.getState().reportReason, "不当发言，请房主核查");
+    assert.equal(h.calls.some((item) => item.toast === "举报已提交给当前房主核查"), true);
+
+    await h.app.handle("load-reports");
+    assert.equal(h.app.getState().reportsOpen, true);
+    assert.deepEqual(h.app.getState().reports, [existing]);
+    await h.app.handle("select-seat", { seatId: "s3" });
+    await h.app.handle("submit-report", { reason: "第二条" });
+    assert.equal(h.app.getState().reports.length, 2);
+    await h.app.handle("load-reports");
+    assert.equal(h.app.getState().reportsOpen, false);
+
+    const nextGame = { ...room(game("NIGHT_WOLF", []), "next"), game: { ...game("NIGHT_WOLF", []), gameId: "g2" } };
+    h.stream().onSnapshot(nextGame);
+    assert.deepEqual(h.app.getState().reports, []);
+    assert.equal(h.app.getState().reportsOpen, false);
+  });
+
+  it("rejects report submission without a target and hides host report loading from non-hosts", async () => {
+    const noTarget = setup({ room: room(game("DAY_SPEECH", [])) });
+    await noTarget.app.start();
+    await noTarget.app.handle("create-room", { nickname: "玩家" });
+    await noTarget.app.handle("submit-report", { reason: "原因" });
+    assert.match(noTarget.app.getState().error, /先选择/);
+    await noTarget.app.handle("select-seat", { seatId: "s2" });
+    await noTarget.app.handle("submit-report", { reason: " ".repeat(3) });
+    assert.match(noTarget.app.getState().error, /1 到 200/);
+
+    const otherRoom = room(game("DAY_SPEECH", []));
+    otherRoom.selfSeatId = "s2";
+    const nonHost = setup({ room: otherRoom });
+    await nonHost.app.start();
+    await nonHost.app.handle("create-room", { nickname: "非房主" });
+    await nonHost.app.handle("load-reports");
+    assert.match(nonHost.app.getState().error, /只有当前房主/);
+    assert.equal(nonHost.calls.includes("list-reports"), false);
+
+    const malformed = setup({ room: room(game("DAY_SPEECH", [])), reportPayload: {} });
+    await malformed.app.start();
+    await malformed.app.handle("create-room", { nickname: "房主" });
+    await malformed.app.handle("load-reports");
+    assert.deepEqual(malformed.app.getState().reports, []);
   });
 });

@@ -61,10 +61,20 @@
       pendingIntent: null,
       retainVoice: false,
       liveVoice: { supported: Boolean(createPeer), enabled: false, connected: false, error: "" },
+      reportReason: "不当发言，请房主核查",
+      reports: [],
+      reportsOpen: false,
+      reportGameId: null,
     };
 
     function render() {
-      if (!disposed) view.render(core.createViewModel(state, now()));
+      if (!disposed) {
+        const model = core.createViewModel(state, now());
+        model.reportReason = state.reportReason;
+        model.reports = state.reports;
+        model.reportsOpen = state.reportsOpen;
+        view.render(model);
+      }
     }
 
     function setError(error) {
@@ -77,6 +87,12 @@
       if (!snapshot || !snapshot.roomId || !snapshot.version) return false;
       state.snapshot = snapshot;
       state.error = "";
+      const nextGameId = snapshot.game?.gameId || null;
+      if (state.reportGameId !== nextGameId) {
+        state.reportGameId = nextGameId;
+        state.reports = [];
+        state.reportsOpen = false;
+      }
       if (state.selectedSeatId && !snapshot.seats.some((seat) => seat.seatId === state.selectedSeatId)) state.selectedSeatId = null;
       render();
       requestNarration(snapshot);
@@ -341,6 +357,10 @@
         render();
         return;
       }
+      if (command === "report-reason") {
+        state.reportReason = String(data.value || "").slice(0, 200);
+        return;
+      }
       if (command === "toggle-live-voice") {
         if (!state.snapshot?.game) {
           view.showToast("牌局开始后可开启实时原声");
@@ -387,6 +407,25 @@
           const session = sessionStore.read();
           await api.markVoice(session.roomId, session.seatToken, data.segmentId, data.label);
           view.showToast("声证标记已保存");
+        } else if (command === "submit-report") {
+          const session = sessionStore.read();
+          const reason = String(data.reason || state.reportReason).trim();
+          if (!session || !state.selectedSeatId) throw new Error("请先选择需要举报的玩家");
+          if (!reason || reason.length > 200) throw new Error("举报原因需为 1 到 200 个字符");
+          const report = await api.createReport(session.roomId, session.seatToken, state.selectedSeatId, reason);
+          if (state.reportsOpen && state.snapshot.selfSeatId === state.snapshot.hostSeatId) state.reports = [...state.reports, report];
+          state.reportReason = "不当发言，请房主核查";
+          view.showToast("举报已提交给当前房主核查");
+        } else if (command === "load-reports") {
+          if (state.reportsOpen) {
+            state.reportsOpen = false;
+          } else {
+            const session = sessionStore.read();
+            if (!session || state.snapshot.selfSeatId !== state.snapshot.hostSeatId) throw new Error("只有当前房主可以查看举报");
+            const payload = await api.listReports(session.roomId, session.seatToken);
+            state.reports = Array.isArray(payload?.reports) ? payload.reports : [];
+            state.reportsOpen = true;
+          }
         }
       });
     }

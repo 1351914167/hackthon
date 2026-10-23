@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
-const { createView, escapeHtml, renderEntry, renderGame, renderLobby } = require("../../src/client/view");
+const { createView, escapeHtml, renderEntry, renderGame, renderLobby, renderReports } = require("../../src/client/view");
 
 class Classes {
   constructor() { this.values = new Set(); }
@@ -53,6 +53,8 @@ describe("client view", () => {
     assert.match(witch, /使用解药/);
     assert.match(witch, /使用毒药/);
     assert.match(witch, /真实发言/);
+    assert.match(witch, /查看举报/);
+    assert.match(witch, /不自动处罚/);
     assert.doesNotMatch(witch, /<青岚>/);
 
     for (const [type, text] of [["WOLF_TARGET_SET", "确认狼刀"], ["SEER_TARGET_SET", "确认查验"], ["VOTE_CAST", "确认投票"], ["HUNTER_SHOT_SET", "确认开枪"]]) {
@@ -216,12 +218,16 @@ describe("client view", () => {
     const fields = { nickname: { value: " 青岚 " }, roomId: { value: " FOG " } };
     root.listeners.submit({ preventDefault() {}, target: { dataset: { form: "join-room" }, elements: { namedItem: (name) => fields[name] } } });
     root.listeners.submit({ preventDefault() {}, target: { dataset: { form: "create-room" }, elements: fields } });
+    root.listeners.submit({ preventDefault() {}, target: { dataset: { form: "report-player" }, elements: { reason: { value: " 举报原因 " } } } });
+    root.listeners.input({ target: { value: "正在输入", closest: () => ({ value: "正在输入" }) } });
     root.listeners.submit({ preventDefault() { throw new Error("should not prevent"); }, target: { dataset: {}, elements: {} } });
     root.listeners.click({ target: { closest: () => null } });
     assert.deepEqual(actions, [
       { name: "select-seat", payload: control.dataset },
       { name: "join-room", payload: { roomId: "FOG", nickname: "青岚" } },
       { name: "create-room", payload: { nickname: "青岚" } },
+      { name: "submit-report", payload: { reason: "举报原因" } },
+      { name: "report-reason", payload: { value: "正在输入" } },
     ]);
 
     ruleButton.listeners.click();
@@ -251,5 +257,26 @@ describe("client view", () => {
     const defaults = createView({ document, root, roomMeta, voiceStatus: status, toast, alertRegion: alert, rulesDialog: rules });
     defaults.bind(() => {});
     root.listeners.submit({ preventDefault() {}, target: { dataset: { form: "create-room" }, elements: {} } });
+  });
+
+  it("renders a host-only report drawer without exposing it to ordinary players", () => {
+    const model = baseModel();
+    model.reportReason = "<不当发言>";
+    model.reportsOpen = true;
+    model.reports = [{ reportId: "r1", reporterSeatId: "s1", targetSeatId: "s2", reason: "请核查 <内容>", createdAt: Date.parse("2026-10-23T10:00:00Z") }];
+    const host = renderReports(model);
+    assert.match(host, /收起/);
+    assert.match(host, /1号 · &lt;青岚&gt; 举报 2号 · 白鹿/);
+    assert.match(host, /请核查 &lt;内容&gt;/);
+    assert.doesNotMatch(host, /<内容>/);
+
+    model.isHost = false;
+    const player = renderReports(model);
+    assert.doesNotMatch(player, /查看举报|收起|请核查/);
+    assert.match(player, /仅房主核查/);
+
+    model.isHost = true;
+    model.reports = [];
+    assert.match(renderReports(model), /暂无举报/);
   });
 });
