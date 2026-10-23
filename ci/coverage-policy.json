@@ -1,0 +1,7 @@
+{
+  "minimum": 95,
+  "legacy": {
+    "app.js": "a5b12b0434e30c732bd23643d9fd8babba2b85897784678ab3752693e8cb089a",
+    "server.js": "9b87777a552479d09fccc07422baab007e3ee70f0632560166d1ed93341e6785"
+  }
+}
