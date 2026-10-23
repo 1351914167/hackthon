@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="雾隐镇语音狼人杀的产品分析、产品设计与技术架构。"
+    />
+    <title>雾隐镇 · 产品蓝图</title>
+    <link rel="stylesheet" href="./product.css" />
+  </head>
+  <body>
+    <header class="brief-nav">
+      <a class="brand" href="./index.html">
+        <span class="brand-mark">雾</span>
+        <span><strong>雾隐镇</strong><small>PRODUCT BLUEPRINT · V1</small></span>
+      </a>
+      <nav aria-label="蓝图目录">
+        <a href="#analysis">分析</a>
+        <a href="#design">设计</a>
+        <a href="#architecture">架构</a>
+        <a href="./index.html" class="primary-link">进入牌局 →</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="intro-band">
+        <div class="intro-copy">
+          <span class="eyebrow">VOICE SOCIAL DEDUCTION</span>
+          <h1>不是把狼人杀搬到线上，<br />而是让每一句话都成为线索。</h1>
+          <p>面向熟人开黑与轻社交组局的中文语音狼人杀。系统主持流程、灵汐承担语音智能、规则引擎保证公平，让玩家把注意力留给发言、判断与博弈。</p>
+        </div>
+        <div class="north-star">
+          <span>北极星指标</span>
+          <strong>有效完局数 / 周</strong>
+          <p>至少 6 名真人、完成胜负结算、无语音阻断的牌局。</p>
+          <div class="metric-row">
+            <div><b>9–12 人</b><small>核心局型</small></div>
+            <div><b>25–40 分</b><small>目标局长</small></div>
+            <div><b>&lt; 800 ms</b><small>转写首字</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="analysis">
+        <div class="section-title">
+          <span class="index">01</span>
+          <div><span class="eyebrow">PRODUCT ANALYSIS</span><h2>产品分析</h2></div>
+        </div>
+
+        <div class="thesis-grid">
+          <article class="thesis-main">
+            <span class="eyebrow">机会判断</span>
+            <h3>语音不是附属通道，而是游戏机制本身</h3>
+            <p>线下狼人杀的张力来自停顿、语气、抢话与沉默。线上产品的关键不是增加更多角色，而是把语音秩序、私密信息、阶段切换和复盘证据做成一套可信系统。</p>
+            <div class="signal-list">
+              <div><span>01</span><p><strong>组局成本高</strong>：缺人、忘词、流程争议会直接导致流局。</p></div>
+              <div><span>02</span><p><strong>语音秩序弱</strong>：多人抢麦与主持人控场消耗大量注意力。</p></div>
+              <div><span>03</span><p><strong>复盘价值丢失</strong>：关键发言与投票路径很难在结算后重建。</p></div>
+            </div>
+          </article>
+          <aside class="audience">
+            <span class="eyebrow">首发人群</span>
+            <h3>18–35 岁语音社交玩家</h3>
+            <ul>
+              <li><strong>熟人开黑组</strong><span>希望 1 分钟内开局，规则无需人工解释。</span></li>
+              <li><strong>进阶逻辑玩家</strong><span>关注发言顺序、票型与可复盘的对局证据。</span></li>
+              <li><strong>轻社交玩家</strong><span>需要低压力破冰与明确的发言边界。</span></li>
+            </ul>
+          </aside>
+        </div>
+
+        <div class="comparison-wrap">
+          <div class="subheading">
+            <div><span class="eyebrow">MARKET MAP</span><h3>参考产品与基础项目</h3></div>
+            <p>结论来自 2026-10-23 的公开页面调研。</p>
+          </div>
+          <div class="comparison-table" role="table" aria-label="竞品与基础项目对比">
+            <div class="comparison-row comparison-head" role="row">
+              <span role="columnheader">对象</span><span role="columnheader">可借鉴</span><span role="columnheader">明确不照搬</span><span role="columnheader">对雾隐镇的决策</span>
+            </div>
+            <div class="comparison-row" role="row">
+              <a href="https://mszmapp.com" target="_blank" rel="noreferrer">百变大侦探 ↗</a>
+              <span>语音房、角色沉浸、系统搜证与投票闭环</span>
+              <span>重内容供给、剧本付费与复杂社区广场</span>
+              <strong>优先做“开局快、语音稳、复盘清楚”</strong>
+            </div>
+            <div class="comparison-row" role="row">
+              <a href="https://github.com/the-nightforge/Nightfall" target="_blank" rel="noreferrer">Nightfall ↗</a>
+              <span>确定性规则引擎、按玩家裁剪状态、断线接管</span>
+              <span>LiveKit 语音与无许可证源码</span>
+              <strong>只参考架构思想，原创实现且语音改走灵汐</strong>
+            </div>
+            <div class="comparison-row" role="row">
+              <a href="https://github.com/xiaoxiaomugong/AI-Werewolf-Live-Voice-Game" target="_blank" rel="noreferrer">AI Werewolf ↗</a>
+              <span>AI 角色与实时语音交互的单点验证</span>
+              <span>AI 代替全部真人的孤立体验</span>
+              <strong>AI 只补位与主持，不决定真人对局结果</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="positioning">
+          <span class="eyebrow">一句话定位</span>
+          <p>给想立刻开一局的朋友们，一间<strong>能听懂、会控场、可复盘</strong>的语音狼人杀房。</p>
+        </div>
+      </section>
+
+      <section class="section design-section" id="design">
+        <div class="section-title">
+          <span class="index">02</span>
+          <div><span class="eyebrow">PRODUCT DESIGN</span><h2>产品设计</h2></div>
+        </div>
+
+        <div class="loop">
+          <article><span>1</span><strong>一分钟组局</strong><p>房主选择人数与标准板子，链接或房间码邀请。</p></article>
+          <div class="arrow">→</div>
+          <article><span>2</span><strong>系统主持</strong><p>发身份、控麦、计时，夜间动作按规则顺序收集。</p></article>
+          <div class="arrow">→</div>
+          <article><span>3</span><strong>语音博弈</strong><p>灵汐转写关键发言，玩家做可信、存疑与查验标记。</p></article>
+          <div class="arrow">→</div>
+          <article><span>4</span><strong>证据复盘</strong><p>按时间线还原查验、投票、死亡与胜负转折。</p></article>
+        </div>
+
+        <div class="design-grid">
+          <article class="design-card">
+            <span class="eyebrow">首发板子</span>
+            <h3>9 人标准局</h3>
+            <div class="role-stack">
+              <div><b>好人阵营</b><span>预言家 · 女巫 · 猎人 · 3 平民</span></div>
+              <div><b>狼人阵营</b><span>3 狼人</span></div>
+            </div>
+            <p>好人放逐全部狼人获胜；狼人数量达到或超过其余存活玩家时获胜。首版不加入第三方阵营，降低学习成本和边界歧义。</p>
+          </article>
+          <article class="design-card">
+            <span class="eyebrow">语音交互</span>
+            <h3>抢麦有秩序，沉默也有反馈</h3>
+            <ul class="checklist">
+              <li>阶段级发言权：夜间静音，白天顺序麦或自由麦。</li>
+              <li>首字延迟、转写状态与失败降级始终可见。</li>
+              <li>AI 合成主持音明确标注，避免与真人声音混淆。</li>
+              <li>原始音频默认不落盘；复盘只保留结构化事件与经同意的转写。</li>
+            </ul>
+          </article>
+          <article class="design-card">
+            <span class="eyebrow">公平机制</span>
+            <h3>秘密永远由服务端裁剪</h3>
+            <ul class="checklist">
+              <li>客户端只收到当前玩家有权看到的角色与夜间结果。</li>
+              <li>胜负、死亡、技能与票型以服务端规则状态为准。</li>
+              <li>AI 只能把规则决定“说出来”，不能改写行动结果。</li>
+              <li>断线进入托管倒计时，重连后恢复本人可见快照。</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="screen-map">
+          <div class="subheading">
+            <div><span class="eyebrow">INFORMATION ARCHITECTURE</span><h3>页面与状态</h3></div>
+          </div>
+          <div class="screen-flow">
+            <div><small>入口</small><strong>房间大厅</strong><span>创建 / 加入 / 板子</span></div>
+            <i>→</i>
+            <div><small>准备</small><strong>席位确认</strong><span>麦克风 / 身份领取</span></div>
+            <i>→</i>
+            <div class="current"><small>核心</small><strong>牌局圆桌</strong><span>发言 / 技能 / 投票</span></div>
+            <i>→</i>
+            <div><small>结果</small><strong>案件复盘</strong><span>阵营 / 票型 / 转折</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="section-title">
+          <span class="index">03</span>
+          <div><span class="eyebrow">PRODUCT ARCHITECTURE</span><h2>产品架构</h2></div>
+        </div>
+
+        <div class="architecture-map" aria-label="系统架构图">
+          <div class="arch-column client-column">
+            <span class="arch-label">客户端</span>
+            <div class="arch-box"><strong>Web / PWA</strong><small>牌局视图 · 麦克风 · 本地音频播放</small></div>
+            <div class="arch-box"><strong>玩家可见状态</strong><small>仅本人的角色、技能与查验结果</small></div>
+          </div>
+          <div class="arch-bridge">
+            <span>HTTPS / WSS</span>
+            <i>⇄</i>
+            <small>房间事件 · 音频帧 · 控麦指令</small>
+          </div>
+          <div class="arch-column server-column">
+            <span class="arch-label">雾隐镇服务端</span>
+            <div class="arch-box key"><strong>房间与规则状态机</strong><small>阶段推进 · 技能结算 · 胜负判定</small></div>
+            <div class="arch-box"><strong>权限与快照裁剪</strong><small>座位令牌 · 断线重连 · 私密信息隔离</small></div>
+            <div class="arch-box"><strong>灵汐语音网关</strong><small>密钥封装 · 限流 · 审计 · 降级</small></div>
+          </div>
+          <div class="arch-bridge accent">
+            <span>灵汐专用</span>
+            <i>⇄</i>
+            <small>任何语音智能能力不接入第二供应商</small>
+          </div>
+          <div class="arch-column provider-column">
+            <span class="arch-label">灵汐 API</span>
+            <div class="arch-box"><strong>Realtime</strong><small>gpt-4o-realtime-preview · 实时主持</small></div>
+            <div class="arch-box"><strong>Speech to Text</strong><small>gpt-4o-transcribe · 发言转写</small></div>
+            <div class="arch-box"><strong>Text to Speech</strong><small>gpt-4o-mini-tts · 系统播报</small></div>
+          </div>
+        </div>
+
+        <div class="architecture-notes">
+          <article>
+            <span class="eyebrow">调用边界</span>
+            <h3>只在服务端持有灵汐密钥</h3>
+            <p>浏览器把录音或实时会话请求交给雾隐镇网关，网关再访问 <code>api.aicso.top</code>。前端永远拿不到长期密钥，日志不记录 Authorization。</p>
+          </article>
+          <article>
+            <span class="eyebrow">当前原型</span>
+            <h3>HTTP 语音闭环已预留</h3>
+            <p>本仓库可直接代理 <code>/v1/audio/transcriptions</code> 与 <code>/v1/audio/speech</code>；Realtime 生产代理需要在下一阶段补充 WSS 会话服务。</p>
+          </article>
+          <article>
+            <span class="eyebrow">降级策略</span>
+            <h3>语音失败不破坏规则</h3>
+            <p>转写与播报失败时保留文字事件和手动操作，阶段计时暂停并提示房主；规则状态机不依赖模型输出。</p>
+          </article>
+        </div>
+
+        <div class="sequence">
+          <div class="subheading"><div><span class="eyebrow">VOICE SEQUENCE</span><h3>一次发言如何进入牌局</h3></div></div>
+          <ol>
+            <li><span>01</span><p><strong>服务端授予发言权</strong><small>校验阶段、座位存活状态和轮次。</small></p></li>
+            <li><span>02</span><p><strong>客户端采集语音</strong><small>显示录音与传输状态，不在本地长期保存。</small></p></li>
+            <li><span>03</span><p><strong>灵汐转写</strong><small>网关调用 gpt-4o-transcribe，结果绑定玩家和阶段。</small></p></li>
+            <li><span>04</span><p><strong>房间广播</strong><small>发布语音状态、转写与时间线事件，观战者只读。</small></p></li>
+            <li><span>05</span><p><strong>结算复盘</strong><small>保留结构化摘要，按同意状态决定是否保留全文。</small></p></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section roadmap-section">
+        <div class="section-title">
+          <span class="index">04</span>
+          <div><span class="eyebrow">DELIVERY</span><h2>落地优先级</h2></div>
+        </div>
+        <div class="roadmap">
+          <article><span>M0 · 本仓库</span><h3>体验原型</h3><p>完整牌局主视图、规则说明、推理便签、阶段切换，以及灵汐 STT/TTS 网关。</p></article>
+          <article><span>M1 · 可玩版本</span><h3>多人房间</h3><p>服务端状态机、WSS 房间事件、座位令牌、断线恢复与真实投票结算。</p></article>
+          <article><span>M2 · 语音版本</span><h3>实时控麦</h3><p>灵汐 Realtime 服务端代理、VAD、抢麦队列、主持音与转写合规留存。</p></article>
+          <article><span>M3 · 增长版本</span><h3>复盘与组局</h3><p>案件卡片、好友再来一局、可信度反馈、举报治理与局型扩展。</p></article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>雾隐镇 · Hackathon Product Blueprint</span>
+      <span>调研日期：2026-10-23</span>
+      <a href="https://aicso.apifox.cn/llms.txt" target="_blank" rel="noreferrer">灵汐 API 文档 ↗</a>
+    </footer>
+  </body>
+</html>
