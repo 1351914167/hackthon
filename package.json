@@ -1,0 +1,12 @@
+{
+  "name": "wuyin-werewolf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "雾隐镇：语音证据与可验证复盘狼人杀",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage', {recursive:true})\" && node --test --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/coverage-inventory.cjs' --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=95 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info && node scripts/coverage-inventory.cjs"
+  }
+}
