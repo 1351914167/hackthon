@@ -47,7 +47,8 @@ function createRoomService(options = {}) {
   if (!options || typeof options !== "object" || Array.isArray(options)) fail("INVALID_REQUEST", "Service options must be an object");
   const clock = options.clock || (() => Date.now());
   const chooseInt = options.randomInt || ((maximum) => randomInt(maximum));
-  const createId = options.createId || ((kind) => `${kind}-${randomUUID()}`);
+  const createId = options.createId || ((kind) => kind === "room"
+    ? `WY-${randomBytes(4).toString("hex").toUpperCase()}` : `${kind}-${randomUUID()}`);
   const createToken = options.createToken || (() => randomBytes(32).toString("base64url"));
   const durations = validateDurations({ ...DEFAULT_DURATIONS, ...(options.durations || {}) });
   const hostDisconnectGraceMs = options.hostDisconnectGraceMs ?? 30_000;
