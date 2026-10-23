@@ -31,10 +31,12 @@ it("restarts the real runtime and restores an authenticated room from SQLite", a
 });
 
 it("closes the repository when runtime configuration is invalid", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wuyin-invalid-"));
   let closed = false;
   const repository = { load: () => null, close: () => { closed = true; } };
-  assert.throws(() => createRuntime({ filename: "/private/tmp/wuyin-runtime-invalid/test.sqlite", repository, gateway: {} }));
+  assert.throws(() => createRuntime({ filename: path.join(directory, "state.sqlite"), repository, gateway: {} }));
   assert.equal(closed, true);
+  fs.rmSync(directory, { recursive: true });
 });
 
 it("uses environment defaults and authenticates voice routes", async () => {
