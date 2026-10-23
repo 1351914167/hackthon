@@ -82,6 +82,18 @@ describe("client api", () => {
     assert.equal(calls[13].init.method, "POST");
   });
 
+  it("submits and lists room-scoped reports with bearer authentication", async () => {
+    const { api, calls } = harness(() => response({ reports: [] }));
+    await api.createReport("room 1", "seat-token", "seat-2", "不当发言，请房主核查");
+    await api.listReports("room 1", "seat-token");
+    assert.equal(calls[0].url, "/api/rooms/room%201/reports");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.headers.Authorization, "Bearer seat-token");
+    assert.deepEqual(JSON.parse(calls[0].init.body), { targetSeatId: "seat-2", reason: "不当发言，请房主核查" });
+    assert.equal(calls[1].init.method, undefined);
+    assert.equal(calls[1].init.headers.Authorization, "Bearer seat-token");
+  });
+
   it("normalizes JSON and non-JSON request errors", async () => {
     const first = harness(() => response({ error: { code: "ROOM_FULL", message: "满员" } }, 409)).api;
     await assert.rejects(() => first.createRoom("x", "i"), (error) => error instanceof ApiError && error.code === "ROOM_FULL" && error.status === 409);

@@ -1,3 +1,3 @@
 "use strict";
 
-module.exports = require("./src/http/application");
+module.exports = require("./src/runtime");

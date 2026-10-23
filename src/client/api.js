@@ -118,6 +118,14 @@
       return postJson(`/api/rooms/${encodeURIComponent(roomId)}/actions`, action, authHeaders(token));
     }
 
+    function createReport(roomId, token, targetSeatId, reason) {
+      return postJson(`/api/rooms/${encodeURIComponent(roomId)}/reports`, { targetSeatId, reason }, authHeaders(token));
+    }
+
+    function listReports(roomId, token) {
+      return json(`/api/rooms/${encodeURIComponent(roomId)}/reports`, { headers: authHeaders(token) });
+    }
+
     async function uploadVoice(roomId, token, blob, durationMs, retain = false) {
       const form = new FormDataCtor();
       form.append("file", blob, "voice.webm");
@@ -197,6 +205,7 @@
 
     return Object.freeze({
       createRoom,
+      createReport,
       gameAction,
       getLingxiStatus,
       getRecap,
@@ -205,6 +214,7 @@
       initSession,
       joinRoom,
       listVoice,
+      listReports,
       markVoice,
       narration,
       roomCommand,

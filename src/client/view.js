@@ -168,6 +168,16 @@
     return items.length ? `<ol class="timeline-list">${items.join("")}</ol>` : `<div class="empty-state">等待首个公开事件</div>`;
   }
 
+  function renderReports(model) {
+    const selected = model.selectedSeat;
+    const reason = escapeHtml(model.reportReason || "不当发言，请房主核查");
+    const reports = Array.isArray(model.reports) ? model.reports : [];
+    const form = `<form class="entry-form" data-form="report-player"><input name="reason" data-field="report-reason" maxlength="200" value="${reason}" aria-label="举报原因" /><button class="button button-secondary" type="submit"${!selected || model.busy ? " disabled" : ""}>提交举报</button></form><p class="privacy-note">${selected ? `举报 ${escapeHtml(selected.number)}号 · ${escapeHtml(selected.nickname)}` : "先选择需要举报的玩家"}；仅交由当前房主核查，不自动处罚。</p>`;
+    if (!model.isHost) return `<section class="intel-section"><div class="section-heading"><h2>房间举报</h2><span>仅房主核查</span></div>${form}</section>`;
+    const drawer = model.reportsOpen ? `<ol class="timeline-list">${reports.length ? reports.map((report) => `<li><span>${escapeHtml(new Date(report.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }))}</span><strong>${escapeHtml(seatName(model.seats, report.reporterSeatId))} 举报 ${escapeHtml(seatName(model.seats, report.targetSeatId))}</strong><small>${escapeHtml(report.reason)}</small></li>`).join("") : "<li><strong>暂无举报</strong></li>"}</ol>` : "";
+    return `<section class="intel-section"><div class="section-heading"><h2>房间举报</h2><button class="clip-mark" type="button" data-command="load-reports" aria-expanded="${Boolean(model.reportsOpen)}">${model.reportsOpen ? "收起" : "查看举报"}</button></div>${form}${drawer}</section>`;
+  }
+
   function renderRecap(model) {
     const roles = model.game.revealedRoles || model.recap?.roles || [];
     const result = model.game.result || (model.recap?.winner ? { winner: model.recap.winner } : null);
@@ -188,6 +198,7 @@
         ${renderRolePanel(model)}
         <section class="intel-section"><div class="section-heading"><h2>场上进程</h2><span>公开事件</span></div>${renderTimeline(model)}</section>
         <section class="intel-section"><div class="section-heading"><h2>声证片段</h2><span>鉴权回听</span></div>${renderSegments(model)}</section>
+        ${renderReports(model)}
       </aside>
       ${model.error ? `<p class="inline-error floating-error" role="alert">${escapeHtml(model.error)}</p>` : ""}
     </section>`;
@@ -227,6 +238,11 @@
         event.preventDefault();
         if (form.dataset.form === "create-room") emit("create-room", { nickname: value(form, "nickname") });
         if (form.dataset.form === "join-room") emit("join-room", { roomId: value(form, "roomId"), nickname: value(form, "nickname") });
+        if (form.dataset.form === "report-player") emit("submit-report", { reason: value(form, "reason") });
+      });
+      root.addEventListener("input", (event) => {
+        const field = event.target.closest?.("[data-field='report-reason']");
+        if (field) emit("report-reason", { value: field.value });
       });
       document.querySelector("#rulesButton")?.addEventListener("click", () => rulesDialog.showModal());
       document.querySelector("#closeRules")?.addEventListener("click", () => rulesDialog.close());
@@ -260,5 +276,5 @@
     return Object.freeze({ bind, render, showAlert, showToast });
   }
 
-  return { createView, escapeHtml, renderEntry, renderGame, renderLobby };
+  return { createView, escapeHtml, renderEntry, renderGame, renderLobby, renderReports };
 });
