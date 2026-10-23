@@ -2,11 +2,8 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta
-      name="description"
-      content="雾隐镇：由灵汐 API 驱动的中文语音狼人杀产品原型。"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="雾隐镇：由灵汐 API 驱动的中文语音狼人杀。" />
     <title>雾隐镇 · 语音狼人杀</title>
     <link rel="preconnect" href="https://images.unsplash.com" />
     <link rel="stylesheet" href="./styles.css" />
@@ -15,223 +12,52 @@
     <div class="ambient" aria-hidden="true"></div>
 
     <header class="topbar">
-      <a class="brand" href="./index.html" aria-label="返回牌局">
-        <span class="brand-mark">雾</span>
-        <span>
-          <strong>雾隐镇</strong>
-          <small>VOICE WEREWOLF</small>
-        </span>
+      <a class="brand" href="./index.html" aria-label="返回雾隐镇入口">
+        <span class="brand-mark" aria-hidden="true">雾</span>
+        <span><strong>雾隐镇</strong><small>VOICE WEREWOLF</small></span>
       </a>
-
-      <div class="room-meta" aria-label="房间信息">
-        <span class="room-code">LY-7392</span>
-        <span class="meta-divider"></span>
-        <span>9 人标准局</span>
-      </div>
-
-      <nav class="top-actions" aria-label="牌局工具">
-        <button class="icon-button" id="rulesButton" type="button" aria-label="查看本局规则" title="本局规则">
-          <span aria-hidden="true">?</span>
-        </button>
-        <a class="icon-button" href="./product.html" aria-label="查看产品蓝图" title="产品蓝图">
-          <span aria-hidden="true">⌘</span>
-        </a>
+      <div class="room-meta" id="roomMeta" aria-live="polite"></div>
+      <nav class="top-actions" aria-label="全局工具">
+        <button class="icon-button" id="rulesButton" type="button" aria-label="查看本局规则" title="本局规则">?</button>
+        <a class="icon-button" href="./product.html" aria-label="查看产品蓝图" title="产品蓝图">⌘</a>
         <div class="voice-status" id="voiceStatus" role="status">
-          <span class="status-dot"></span>
-          <span>检测灵汐通道</span>
+          <span class="status-dot" aria-hidden="true"></span><span>检查灵汐</span>
         </div>
       </nav>
     </header>
 
-    <main class="game-shell">
-      <aside class="panel roster-panel" aria-labelledby="rosterTitle">
-        <div class="panel-heading">
-          <div>
-            <span class="eyebrow">存活 8 / 9</span>
-            <h2 id="rosterTitle">圆桌席位</h2>
-          </div>
-          <span class="online-count">8 在线</span>
-        </div>
-
-        <div class="player-list" id="playerList">
-          <button class="player active-speaker" type="button" data-player="1">
-            <span class="avatar avatar-1">舟</span>
-            <span class="player-copy"><strong>1号 · 方舟</strong><small>发言中</small></span>
-            <span class="voice-bars mini" aria-hidden="true"><i></i><i></i><i></i></span>
-          </button>
-          <button class="player" type="button" data-player="2">
-            <span class="avatar avatar-2">鹿</span>
-            <span class="player-copy"><strong>2号 · 白鹿</strong><small>在线</small></span>
-            <span class="seat-number">02</span>
-          </button>
-          <button class="player is-self" type="button" data-player="3">
-            <span class="avatar avatar-3">你</span>
-            <span class="player-copy"><strong>3号 · 你</strong><small>预言家</small></span>
-            <span class="self-badge">自己</span>
-          </button>
-          <button class="player" type="button" data-player="4">
-            <span class="avatar avatar-4">澄</span>
-            <span class="player-copy"><strong>4号 · 澄月</strong><small>在线</small></span>
-            <span class="seat-number">04</span>
-          </button>
-          <button class="player eliminated" type="button" data-player="5">
-            <span class="avatar avatar-5">川</span>
-            <span class="player-copy"><strong>5号 · 临川</strong><small>昨夜出局</small></span>
-            <span class="seat-number">05</span>
-          </button>
-          <button class="player" type="button" data-player="6">
-            <span class="avatar avatar-6">岚</span>
-            <span class="player-copy"><strong>6号 · 青岚</strong><small>在线</small></span>
-            <span class="seat-number">06</span>
-          </button>
-          <button class="player" type="button" data-player="7">
-            <span class="avatar avatar-7">禾</span>
-            <span class="player-copy"><strong>7号 · 麦禾</strong><small>在线</small></span>
-            <span class="seat-number">07</span>
-          </button>
-          <button class="player" type="button" data-player="8">
-            <span class="avatar avatar-8">砚</span>
-            <span class="player-copy"><strong>8号 · 砚白</strong><small>在线</small></span>
-            <span class="seat-number">08</span>
-          </button>
-          <button class="player" type="button" data-player="9">
-            <span class="avatar avatar-9">檀</span>
-            <span class="player-copy"><strong>9号 · 檀星</strong><small>在线</small></span>
-            <span class="seat-number">09</span>
-          </button>
-        </div>
-      </aside>
-
-      <section class="stage" aria-labelledby="phaseTitle">
-        <div class="phase-strip">
-          <span class="phase-icon" aria-hidden="true">☼</span>
-          <div>
-            <span class="eyebrow">DAY 02</span>
-            <h1 id="phaseTitle">自由发言</h1>
-          </div>
-          <button class="phase-control" id="nextPhaseButton" type="button">
-            <span>主持</span>
-            <strong>进入公投</strong>
-            <span aria-hidden="true">→</span>
-          </button>
-        </div>
-
-        <div class="speaker-stage">
-          <div class="moon" aria-hidden="true"></div>
-          <div class="timer" id="timer" role="timer" aria-label="剩余发言时间">
-            <strong id="timerValue">01:18</strong>
-            <span>剩余发言</span>
-          </div>
-
-          <div class="speaker-card">
-            <span class="seat-label">1号玩家</span>
-            <div class="speaker-avatar">舟</div>
-            <h2>方舟</h2>
-            <p id="liveTranscript">“昨晚女巫没有救人，预言家可以先报查验。我认为 7 号的视角有问题……”</p>
-            <div class="waveform" aria-label="正在通过灵汐转写">
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-            </div>
-          </div>
-
-          <div class="quick-actions" aria-label="快速标记">
-            <button type="button" data-mark="可信">✓ 可信</button>
-            <button type="button" data-mark="存疑">? 存疑</button>
-            <button type="button" data-mark="重点关注">! 关注</button>
-          </div>
-        </div>
-
-        <div class="speak-dock">
-          <div class="connection-copy">
-            <span class="eyebrow">轮到你时</span>
-            <strong id="micHint">点击开麦，松开即送出</strong>
-          </div>
-          <button class="mic-button" id="micButton" type="button" aria-label="按住发言">
-            <span class="mic-glyph" aria-hidden="true">●</span>
-            <span>开麦</span>
-          </button>
-          <div class="latency">
-            <span>灵汐</span>
-            <strong id="latencyValue">待命</strong>
-          </div>
-        </div>
+    <main id="app" class="app-root" aria-live="off">
+      <section class="loading-screen" aria-busy="true">
+        <span class="loading-mark" aria-hidden="true">雾</span>
+        <p>正在连接雾隐镇</p>
       </section>
-
-      <aside class="panel intel-panel">
-        <section class="role-card" aria-labelledby="roleTitle">
-          <div class="role-card-top">
-            <span class="eyebrow">你的身份 · 仅自己可见</span>
-            <span class="role-symbol" aria-hidden="true">◉</span>
-          </div>
-          <h2 id="roleTitle">预言家</h2>
-          <p>每晚查验一名玩家的阵营。让好人相信你，但别过早暴露在狼人的视线中。</p>
-          <div class="role-result">
-            <span>昨夜查验</span>
-            <strong>7号 · 好人</strong>
-          </div>
-        </section>
-
-        <section class="intel-section" aria-labelledby="notesTitle">
-          <div class="section-heading">
-            <h2 id="notesTitle">推理便签</h2>
-            <button class="text-button" id="clearNotes" type="button">清空</button>
-          </div>
-          <div class="notes" id="notes">
-            <button type="button" data-note="7号 · 好人">7号 · 好人</button>
-            <button type="button" data-note="1号 · 待验">1号 · 待验</button>
-          </div>
-          <form class="note-form" id="noteForm">
-            <input id="noteInput" type="text" maxlength="20" placeholder="记录一条判断" aria-label="记录推理判断" />
-            <button type="submit" aria-label="添加便签" title="添加便签">＋</button>
-          </form>
-        </section>
-
-        <section class="intel-section timeline" aria-labelledby="timelineTitle">
-          <div class="section-heading">
-            <h2 id="timelineTitle">场上进程</h2>
-            <span>自动记录</span>
-          </div>
-          <ol id="timelineList">
-            <li><time>08:42</time><span>天亮，5号玩家昨夜出局</span></li>
-            <li><time>08:44</time><span>警长竞选结束，1号当选</span></li>
-            <li><time>08:47</time><span>1号开始顺序发言</span></li>
-          </ol>
-        </section>
-      </aside>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="alert-region" id="alertRegion" role="alert" aria-live="assertive"></div>
+    <audio id="remoteVoice" class="remote-voice" autoplay></audio>
 
-    <dialog class="rules-dialog" id="rulesDialog">
+    <dialog class="rules-dialog" id="rulesDialog" aria-labelledby="rulesTitle">
       <div class="dialog-header">
-        <div>
-          <span class="eyebrow">9 人标准局</span>
-          <h2>本局规则</h2>
-        </div>
+        <div><span class="eyebrow">standard-9-v1</span><h2 id="rulesTitle">9 人标准局</h2></div>
         <button class="icon-button" id="closeRules" type="button" aria-label="关闭规则">×</button>
       </div>
       <div class="rule-grid">
-        <section>
-          <span class="rule-count">3</span>
-          <h3>神职</h3>
-          <p>预言家、女巫、猎人</p>
-        </section>
-        <section>
-          <span class="rule-count">3</span>
-          <h3>狼人</h3>
-          <p>每晚共同选择一名玩家袭击</p>
-        </section>
-        <section>
-          <span class="rule-count">3</span>
-          <h3>平民</h3>
-          <p>通过发言与投票找出全部狼人</p>
-        </section>
+        <section><span class="rule-count">3</span><h3>狼人</h3><p>每晚严格多数选择袭击目标。</p></section>
+        <section><span class="rule-count">3</span><h3>神职</h3><p>预言家、女巫、猎人各一名。</p></section>
+        <section><span class="rule-count">3</span><h3>平民</h3><p>通过发言与公投找出狼人。</p></section>
       </div>
       <div class="rule-copy">
-        <h3>胜负条件</h3>
-        <p>好人放逐全部狼人获胜；狼人数量达到或超过其余存活玩家时获胜。白天依次发言并公投，夜晚按狼人、女巫、预言家顺序行动。</p>
+        <h3>胜负与流程</h3>
+        <p>好人放逐全部狼人获胜；狼人数量达到或超过其余存活玩家时获胜。放逐后先进行遗言，猎人符合条件时再开枪，最后判定胜负。</p>
       </div>
     </dialog>
 
+    <script src="./src/client/core.js" defer></script>
+    <script src="./src/client/api.js" defer></script>
+    <script src="./src/client/voice.js" defer></script>
+    <script src="./src/client/view.js" defer></script>
+    <script src="./src/client/app.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>
