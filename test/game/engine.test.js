@@ -83,7 +83,6 @@ function inPhase(phase, overrides = {}) {
   state.round = phase === PHASES.ROLE_REVEAL ? 0 : 1;
   state.deadlineAt = DEADLINE;
   Object.assign(state, structuredClone(overrides));
-  assertInvariant(state);
   return state;
 }
 
@@ -95,6 +94,43 @@ function dead(state, seatId, reasons = ["EXILED"]) {
 
 function timeout(state) {
   return apply(state, COMMANDS.PHASE_TIMEOUT, undefined, {}, { trusted: true });
+}
+
+function createFlow() {
+  const origin = initial();
+  const start = apply(origin, COMMANDS.GAME_START, "seat-1", {}, { roleAssignments: roles });
+  return { origin, state: start.state, events: [...start.events] };
+}
+
+function run(flow, type, actorSeatId, payload = {}, extraContext = {}) {
+  const result = apply(flow.state, type, actorSeatId, payload, extraContext);
+  flow.state = result.state;
+  flow.events.push(...result.events);
+  return result;
+}
+
+function runTimeout(flow) {
+  return run(flow, COMMANDS.PHASE_TIMEOUT, undefined, {}, { trusted: true });
+}
+
+function finishSpeeches(flow) {
+  while (flow.state.phase === PHASES.DAY_SPEECH) {
+    run(flow, COMMANDS.SPEECH_FINISH, flow.state.speechOrder[flow.state.speechIndex]);
+  }
+}
+
+function runNight(flow, targetSeatId, witchAction = { kind: "SKIP" }) {
+  const livingWolves = flow.state.seats.filter((seat) => seat.alive && flow.state.roles[seat.seatId] === ROLES.WEREWOLF);
+  const majority = Math.floor(livingWolves.length / 2) + 1;
+  for (const wolf of livingWolves.slice(0, majority)) {
+    run(flow, COMMANDS.WOLF_TARGET_SET, wolf.seatId, { targetSeatId });
+  }
+  runTimeout(flow);
+  if (flow.state.seats.find((seat) => seat.seatId === "seat-5").alive) {
+    run(flow, COMMANDS.WITCH_ACTION_SET, "seat-5", witchAction);
+  }
+  runTimeout(flow);
+  runTimeout(flow);
 }
 
 function expectCode(code, callback) {
@@ -117,14 +153,20 @@ describe("state creation and invariants", () => {
   it("rejects invalid initial state inputs", () => {
     for (const overrides of [
       { roomId: "" },
+      { roomId: 42 },
       { gameId: "" },
+      { gameId: "__proto__" },
       { hostSeatId: "" },
       { rulesetId: "future" },
       { seats: seats.slice(0, 8) },
       { seats: [...seats.slice(0, 8), { seatId: "seat-8" }] },
       { seats: [...seats.slice(0, 8), { seatId: "" }] },
       { hostSeatId: "seat-99" },
+      { hostSeatId: "constructor" },
+      { seats: [...seats.slice(0, 8), null] },
+      { seats: [...seats.slice(0, 8), { seatId: "__proto__" }] },
     ]) expectCode("INVALID_REQUEST", () => initial(overrides));
+    expectCode("INVALID_REQUEST", () => createInitialState());
   });
 
   it("rejects corrupted state invariants", () => {
@@ -165,6 +207,45 @@ describe("state creation and invariants", () => {
     const gameOverWithoutWinner = started();
     gameOverWithoutWinner.phase = PHASES.GAME_OVER;
     expectCode("INVALID_STATE", () => assertInvariant(gameOverWithoutWinner));
+
+    const malformedStates = [
+      {},
+      { ...initial(), seats: null },
+      { ...initial(), seats: [null, ...seats.slice(1)] },
+      { ...started(), started: false },
+      { ...started(), night: { ...started().night, seerTarget: "missing" } },
+      { ...started(), deaths: [{ seatId: "missing", reasons: [], round: 0 }] },
+      { ...started(), deaths: [null] },
+      { ...started(), phase: PHASES.LAST_WORD },
+      { ...started(), phase: PHASES.HUNTER_SHOT },
+      { ...started(), hunterShotTarget: "seat-7" },
+      { ...started(), hunterResolved: true },
+      { ...started(), night: { ...started().night, wolfTargets: { missing: "seat-7" } } },
+    ];
+    for (const state of malformedStates) expectCode("INVALID_STATE", () => assertInvariant(state));
+
+    const malformedLastWord = inPhase(PHASES.LAST_WORD, {
+      pendingLastWord: { seatId: "seat-7", hunterEligible: false },
+    });
+    expectCode("INVALID_STATE", () => assertInvariant(malformedLastWord));
+
+    const malformedHunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-5", resumePhase: PHASES.DAY_SPEECH },
+    });
+    dead(malformedHunter, "seat-5");
+    expectCode("INVALID_STATE", () => assertInvariant(malformedHunter));
+
+    const malformedHunterTarget = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+      hunterShotTarget: "missing",
+    });
+    dead(malformedHunterTarget, "seat-6", ["WOLF_ATTACK"]);
+    expectCode("INVALID_STATE", () => assertInvariant(malformedHunterTarget));
+
+    const pollutedRoles = initial();
+    pollutedRoles.roles = JSON.parse('{"__proto__":"SEER"}');
+    expectCode("INVALID_STATE", () => assertInvariant(pollutedRoles));
+    expectCode("INVALID_STATE", () => roleTeam("UNKNOWN"));
   });
 });
 
@@ -362,18 +443,19 @@ describe("dawn resolution", () => {
 
 describe("speech and voting", () => {
   it("advances speech in seat order by finish or timeout", () => {
+    const speechOrder = seats.map((seat) => seat.seatId);
     let state = inPhase(PHASES.DAY_SPEECH, {
-      speechOrder: ["seat-1", "seat-2"],
-      speechIndex: 0,
+      speechOrder,
+      speechIndex: 7,
     });
-    state = apply(state, COMMANDS.SPEECH_FINISH, "seat-1").state;
+    state = apply(state, COMMANDS.SPEECH_FINISH, "seat-8").state;
     assert.equal(state.phase, PHASES.DAY_SPEECH);
-    assert.equal(state.speechIndex, 1);
+    assert.equal(state.speechIndex, 8);
     state = timeout(state).state;
     assert.equal(state.phase, PHASES.DAY_VOTE);
     assert.deepEqual(state.votes, {});
 
-    const wrongSpeaker = inPhase(PHASES.DAY_SPEECH, { speechOrder: ["seat-1"], speechIndex: 0 });
+    const wrongSpeaker = inPhase(PHASES.DAY_SPEECH, { speechOrder, speechIndex: 0 });
     expectCode("ACTION_NOT_ALLOWED", () => apply(wrongSpeaker, COMMANDS.SPEECH_FINISH, "seat-2"));
   });
 
@@ -387,8 +469,10 @@ describe("speech and voting", () => {
     assert.equal(result.state.deaths[0].seatId, "seat-2");
     assert.equal(result.state.voteHistory[0].exiledSeatId, "seat-2");
     assert.equal(result.state.voteHistory[0].ballots.length, 9);
-    assert.equal(result.state.phase, PHASES.NIGHT_WOLF);
-    assert.equal(result.state.round, 2);
+    assert.equal(result.state.phase, PHASES.LAST_WORD);
+    const afterLastWord = apply(result.state, COMMANDS.LAST_WORD_FINISH, "seat-2").state;
+    assert.equal(afterLastWord.phase, PHASES.NIGHT_WOLF);
+    assert.equal(afterLastWord.round, 2);
   });
 
   it("does not exile on a tie or no votes", () => {
@@ -405,6 +489,16 @@ describe("speech and voting", () => {
     const deadVoter = dead(structuredClone(state), "seat-7");
     expectCode("ACTION_NOT_ALLOWED", () => apply(deadVoter, COMMANDS.VOTE_CAST, "seat-7", { targetSeatId: "seat-1" }));
   });
+
+  it("allows only the exiled player to finish a last word and supports timeout", () => {
+    let state = inPhase(PHASES.DAY_VOTE);
+    state = apply(state, COMMANDS.VOTE_CAST, "seat-4", { targetSeatId: "seat-2" }).state;
+    state = timeout(state).state;
+    expectCode("ACTION_NOT_ALLOWED", () => apply(state, COMMANDS.LAST_WORD_FINISH, "seat-4"));
+    const result = timeout(state).state;
+    assert.equal(result.phase, PHASES.NIGHT_WOLF);
+    assert.equal(result.round, 2);
+  });
 });
 
 describe("hunter and victory", () => {
@@ -414,6 +508,8 @@ describe("hunter and victory", () => {
       state = apply(state, COMMANDS.VOTE_CAST, voter, { targetSeatId: "seat-6" }).state;
     }
     state = timeout(state).state;
+    assert.equal(state.phase, PHASES.LAST_WORD);
+    state = apply(state, COMMANDS.LAST_WORD_FINISH, "seat-6").state;
     assert.equal(state.phase, PHASES.HUNTER_SHOT);
     assert.equal(state.pendingHunter.resumePhase, PHASES.NIGHT_WOLF);
     state = apply(state, COMMANDS.HUNTER_SHOT_SET, "seat-6", { targetSeatId: "seat-1" }).state;
@@ -450,6 +546,18 @@ describe("hunter and victory", () => {
     }
   });
 
+  it("records an explicit resolution proof for hunter timeout", () => {
+    const state = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+    });
+    dead(state, "seat-6", ["WOLF_ATTACK"]);
+    const result = timeout(state);
+    assert.equal(result.events[0].type, EVENTS.PRIVATE_ACTION_RECORDED);
+    assert.equal(result.events[0].payload.timedOut, true);
+    assert.equal(result.state.phase, PHASES.DAY_SPEECH);
+    assert.equal(result.state.hunterResolved, false);
+  });
+
   it("resumes the pending phase after a hunter timeout without a winner", () => {
     const state = inPhase(PHASES.HUNTER_SHOT, {
       pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
@@ -483,7 +591,71 @@ describe("hunter and victory", () => {
   });
 });
 
+describe("complete command-driven paths", () => {
+  it("replays a legal good victory path including hunter and last word", () => {
+    const flow = createFlow();
+    runTimeout(flow);
+    runNight(flow, "seat-6");
+    assert.equal(flow.state.phase, PHASES.HUNTER_SHOT);
+    run(flow, COMMANDS.HUNTER_SHOT_SET, "seat-6", { targetSeatId: "seat-1" });
+    finishSpeeches(flow);
+    run(flow, COMMANDS.VOTE_CAST, "seat-4", { targetSeatId: "seat-2" });
+    runTimeout(flow);
+    assert.equal(flow.state.phase, PHASES.LAST_WORD);
+    run(flow, COMMANDS.LAST_WORD_FINISH, "seat-2");
+    runNight(flow, "seat-7", { kind: "POISON", targetSeatId: "seat-3" });
+
+    assert.equal(flow.state.phase, PHASES.GAME_OVER);
+    assert.equal(flow.state.winner, TEAMS.GOOD);
+    assert.deepEqual(replay(flow.origin, flow.events), flow.state);
+  });
+
+  it("replays a legal werewolf parity victory path", () => {
+    const flow = createFlow();
+    runTimeout(flow);
+    runNight(flow, "seat-7");
+    finishSpeeches(flow);
+    run(flow, COMMANDS.VOTE_CAST, "seat-1", { targetSeatId: "seat-8" });
+    runTimeout(flow);
+    run(flow, COMMANDS.LAST_WORD_FINISH, "seat-8");
+    runNight(flow, "seat-9");
+
+    assert.equal(flow.state.phase, PHASES.GAME_OVER);
+    assert.equal(flow.state.winner, TEAMS.WEREWOLF);
+    assert.deepEqual(replay(flow.origin, flow.events), flow.state);
+  });
+
+  it("replays a legal path that stops at a pending hunter", () => {
+    const flow = createFlow();
+    runTimeout(flow);
+    runNight(flow, "seat-6");
+
+    assert.equal(flow.state.phase, PHASES.HUNTER_SHOT);
+    assert.deepEqual(flow.state.pendingHunter, { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH });
+    assert.deepEqual(replay(flow.origin, flow.events), flow.state);
+  });
+});
+
 describe("events and replay safety", () => {
+  it("replays equivalent JSON objects regardless of property insertion order", () => {
+    const flow = createFlow();
+    runTimeout(flow);
+    runNight(flow, "seat-7");
+    finishSpeeches(flow);
+    run(flow, COMMANDS.VOTE_CAST, "seat-4", { targetSeatId: "seat-2" });
+    runTimeout(flow);
+
+    function reorder(value) {
+      if (Array.isArray(value)) return value.map(reorder);
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorder(child)]));
+      }
+      return value;
+    }
+    const reorderedLog = JSON.parse(JSON.stringify(reorder(flow.events)));
+    assert.deepEqual(replay(flow.origin, reorderedLog), flow.state);
+  });
+
   function validEvent(state, type, payload = {}) {
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -516,13 +688,17 @@ describe("events and replay safety", () => {
 
   it("validates role, death, finish, reveal, and phase events", () => {
     const lobby = initial();
+    const gameStarted = evolve(lobby, validEvent(lobby, EVENTS.GAME_STARTED, {
+      rulesetId: RULESET_ID,
+      seatIds: seats.map((seat) => seat.seatId),
+    }));
     for (const payload of [
       { seatId: "missing", role: ROLES.SEER, team: TEAMS.GOOD },
       { seatId: "seat-1", role: "UNKNOWN", team: TEAMS.GOOD },
       { seatId: "seat-1", role: ROLES.WEREWOLF, team: TEAMS.GOOD },
-    ]) expectCode("INVALID_EVENT", () => evolve(lobby, validEvent(lobby, EVENTS.ROLE_ASSIGNED, payload)));
+    ]) expectCode("INVALID_EVENT", () => evolve(gameStarted, validEvent(gameStarted, EVENTS.ROLE_ASSIGNED, payload)));
 
-    const withRole = evolve(lobby, validEvent(lobby, EVENTS.ROLE_ASSIGNED, { seatId: "seat-1", role: ROLES.WEREWOLF, team: TEAMS.WEREWOLF }));
+    const withRole = evolve(gameStarted, validEvent(gameStarted, EVENTS.ROLE_ASSIGNED, { seatId: "seat-1", role: ROLES.WEREWOLF, team: TEAMS.WEREWOLF }));
     expectCode("INVALID_EVENT", () => evolve(withRole, validEvent(withRole, EVENTS.ROLE_ASSIGNED, { seatId: "seat-1", role: ROLES.WEREWOLF, team: TEAMS.WEREWOLF })));
 
     const live = started();
@@ -569,7 +745,11 @@ describe("events and replay safety", () => {
     expectCode("INVALID_EVENT", () => evolve(started(), validEvent(started(), EVENTS.VOTE_RECORDED, votePayload)));
     assert.equal(evolve(vote, validEvent(vote, EVENTS.VOTE_RECORDED, { voterSeatId: "seat-4", targetSeatId: null })).votes["seat-4"], null);
 
-    const voteResult = { round: 1, ballots: [], exiledSeatId: null };
+    const voteResult = {
+      round: 1,
+      ballots: seats.map((seat) => ({ voterSeatId: seat.seatId, targetSeatId: null })),
+      exiledSeatId: null,
+    };
     assert.equal(evolve(vote, validEvent(vote, EVENTS.VOTE_RESULT_REVEALED, voteResult)).voteHistory.length, 1);
     for (const payload of [
       { ...voteResult, round: 2 },
@@ -578,22 +758,237 @@ describe("events and replay safety", () => {
     expectCode("INVALID_EVENT", () => evolve(started(), validEvent(started(), EVENTS.VOTE_RESULT_REVEALED, voteResult)));
   });
 
+  it("rejects forged private action events with rule errors", () => {
+    const ready = initial();
+    const readyPayload = { actionType: COMMANDS.ROOM_READY_SET, actorSeatId: "seat-1", ready: true };
+    expectCode("INVALID_EVENT", () => evolve(ready, validEvent(ready, EVENTS.PRIVATE_ACTION_RECORDED, { ...readyPayload, actorSeatId: "missing" })));
+    expectCode("INVALID_EVENT", () => evolve(started(), validEvent(started(), EVENTS.PRIVATE_ACTION_RECORDED, readyPayload)));
+
+    const wolf = inPhase(PHASES.NIGHT_WOLF);
+    expectCode("INVALID_EVENT", () => evolve(wolf, validEvent(wolf, EVENTS.PRIVATE_ACTION_RECORDED, {
+      actionType: COMMANDS.WOLF_TARGET_SET,
+      actorSeatId: "seat-4",
+      targetSeatId: "seat-7",
+    })));
+
+    const witch = inPhase(PHASES.NIGHT_WITCH);
+    expectCode("INVALID_EVENT", () => evolve(witch, validEvent(witch, EVENTS.PRIVATE_ACTION_RECORDED, {
+      actionType: COMMANDS.WITCH_ACTION_SET,
+      actorSeatId: "seat-5",
+      action: { kind: "SAVE", targetSeatId: "seat-7" },
+    })));
+
+    const seer = inPhase(PHASES.NIGHT_SEER);
+    expectCode("INVALID_EVENT", () => evolve(seer, validEvent(seer, EVENTS.PRIVATE_ACTION_RECORDED, {
+      actionType: COMMANDS.SEER_TARGET_SET,
+      actorSeatId: "seat-4",
+      targetSeatId: "seat-4",
+    })));
+
+    const hunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+    });
+    dead(hunter, "seat-6", ["WOLF_ATTACK"]);
+    expectCode("INVALID_EVENT", () => evolve(hunter, validEvent(hunter, EVENTS.PRIVATE_ACTION_RECORDED, {
+      actionType: COMMANDS.HUNTER_SHOT_SET,
+      actorSeatId: "seat-5",
+      targetSeatId: "seat-7",
+    })));
+  });
+
+  it("rejects forged deaths in every resolution context", () => {
+    const dawn = inPhase(PHASES.DAWN_RESOLUTION, {
+      night: { wolfTargets: {}, wolfAttackTarget: "seat-7", witchAction: null, seerTarget: null },
+    });
+    expectCode("INVALID_EVENT", () => evolve(dawn, validEvent(dawn, EVENTS.PLAYER_DIED, {
+      seatId: "seat-8",
+      reasons: ["WOLF_ATTACK"],
+      round: 1,
+    })));
+    expectCode("INVALID_EVENT", () => evolve(dawn, validEvent(dawn, EVENTS.PLAYER_DIED, {
+      seatId: "seat-7",
+      reasons: ["WOLF_ATTACK", "WOLF_ATTACK"],
+      round: 1,
+    })));
+
+    const vote = inPhase(PHASES.DAY_VOTE, {
+      voteHistory: [{ round: 1, ballots: [], exiledSeatId: "seat-7" }],
+    });
+    expectCode("INVALID_EVENT", () => evolve(vote, validEvent(vote, EVENTS.PLAYER_DIED, {
+      seatId: "seat-8",
+      reasons: ["EXILED"],
+      round: 1,
+    })));
+
+    const hunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+      hunterShotTarget: "seat-7",
+    });
+    dead(hunter, "seat-6", ["WOLF_ATTACK"]);
+    expectCode("INVALID_EVENT", () => evolve(hunter, validEvent(hunter, EVENTS.PLAYER_DIED, {
+      seatId: "seat-8",
+      reasons: ["HUNTER_SHOT"],
+      round: 1,
+    })));
+
+    const reveal = started();
+    expectCode("INVALID_EVENT", () => evolve(reveal, validEvent(reveal, EVENTS.PLAYER_DIED, {
+      seatId: "seat-7",
+      reasons: ["EXILED"],
+      round: 0,
+    })));
+  });
+
+  it("rejects forged phase payload semantics", () => {
+    const speechOrder = seats.map((seat) => seat.seatId);
+    const speech = inPhase(PHASES.DAY_SPEECH, { speechOrder, speechIndex: 0 });
+    expectCode("INVALID_EVENT", () => evolve(speech, validEvent(speech, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.DAY_SPEECH,
+      round: 1,
+      deadlineAt: DEADLINE,
+      speechOrder: speechOrder.slice().reverse(),
+      speechIndex: 1,
+      currentSpeakerSeatId: "seat-2",
+    })));
+    expectCode("INVALID_EVENT", () => evolve(speech, validEvent(speech, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.DAY_VOTE,
+      round: 1,
+      deadlineAt: DEADLINE,
+    })));
+
+    const vote = inPhase(PHASES.DAY_VOTE, {
+      voteHistory: [{ round: 1, ballots: [], exiledSeatId: "seat-7" }],
+    });
+    dead(vote, "seat-7");
+    expectCode("INVALID_EVENT", () => evolve(vote, validEvent(vote, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.LAST_WORD,
+      round: 1,
+      deadlineAt: DEADLINE,
+      pendingLastWord: { seatId: "seat-8", hunterEligible: false },
+    })));
+    expectCode("INVALID_EVENT", () => evolve(vote, validEvent(vote, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.NIGHT_WOLF,
+      round: 2,
+      deadlineAt: DEADLINE,
+    })));
+
+    const poisonedHunter = inPhase(PHASES.DAWN_RESOLUTION);
+    dead(poisonedHunter, "seat-6", ["WITCH_POISON"]);
+    expectCode("INVALID_EVENT", () => evolve(poisonedHunter, validEvent(poisonedHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.HUNTER_SHOT,
+      round: 1,
+      deadlineAt: DEADLINE,
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+    })));
+
+    const wolfKilledHunter = inPhase(PHASES.DAWN_RESOLUTION);
+    dead(wolfKilledHunter, "seat-6", ["WOLF_ATTACK"]);
+    expectCode("INVALID_EVENT", () => evolve(wolfKilledHunter, validEvent(wolfKilledHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.HUNTER_SHOT,
+      round: 1,
+      deadlineAt: DEADLINE,
+      pendingHunter: { seatId: "seat-5", resumePhase: PHASES.DAY_SPEECH },
+    })));
+    const dawnSpeechOrder = seats.map((seat) => seat.seatId).filter((seatId) => seatId !== "seat-6");
+    expectCode("INVALID_EVENT", () => evolve(wolfKilledHunter, validEvent(wolfKilledHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.DAY_SPEECH,
+      round: 1,
+      deadlineAt: DEADLINE,
+      speechOrder: dawnSpeechOrder,
+      speechIndex: 0,
+      currentSpeakerSeatId: dawnSpeechOrder[0],
+    })));
+
+    const nonHunterLastWord = inPhase(PHASES.LAST_WORD, {
+      pendingLastWord: { seatId: "seat-7", hunterEligible: false },
+    });
+    dead(nonHunterLastWord, "seat-7");
+    expectCode("INVALID_EVENT", () => evolve(nonHunterLastWord, validEvent(nonHunterLastWord, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.HUNTER_SHOT,
+      round: 1,
+      deadlineAt: DEADLINE,
+      pendingHunter: { seatId: "seat-7", resumePhase: PHASES.NIGHT_WOLF },
+    })));
+
+    const hunterLastWord = inPhase(PHASES.LAST_WORD, {
+      pendingLastWord: { seatId: "seat-6", hunterEligible: true },
+    });
+    dead(hunterLastWord, "seat-6", ["EXILED"]);
+    expectCode("INVALID_EVENT", () => evolve(hunterLastWord, validEvent(hunterLastWord, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.NIGHT_WOLF,
+      round: 2,
+      deadlineAt: DEADLINE,
+    })));
+
+    const nightResumeHunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.NIGHT_WOLF },
+    });
+    dead(nightResumeHunter, "seat-6", ["EXILED"]);
+    const aliveAfterHunter = seats.map((seat) => seat.seatId).filter((seatId) => seatId !== "seat-6");
+    expectCode("INVALID_EVENT", () => evolve(nightResumeHunter, validEvent(nightResumeHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.DAY_SPEECH,
+      round: 1,
+      deadlineAt: DEADLINE,
+      speechOrder: aliveAfterHunter,
+      speechIndex: 0,
+      currentSpeakerSeatId: aliveAfterHunter[0],
+    })));
+
+    const dayResumeHunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.DAY_SPEECH },
+    });
+    dead(dayResumeHunter, "seat-6", ["WOLF_ATTACK"]);
+    expectCode("INVALID_EVENT", () => evolve(dayResumeHunter, validEvent(dayResumeHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.NIGHT_WOLF,
+      round: 2,
+      deadlineAt: DEADLINE,
+    })));
+
+    expectCode("INVALID_EVENT", () => evolve(dayResumeHunter, validEvent(dayResumeHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.DAY_SPEECH,
+      round: 1,
+      deadlineAt: DEADLINE,
+      speechOrder: aliveAfterHunter,
+      speechIndex: 0,
+      currentSpeakerSeatId: aliveAfterHunter[0],
+    })));
+
+    const unresolvedNightHunter = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.NIGHT_WOLF },
+    });
+    dead(unresolvedNightHunter, "seat-6", ["EXILED"]);
+    expectCode("INVALID_EVENT", () => evolve(unresolvedNightHunter, validEvent(unresolvedNightHunter, EVENTS.PHASE_CHANGED, {
+      phase: PHASES.NIGHT_WOLF,
+      round: 2,
+      deadlineAt: DEADLINE,
+    })));
+  });
+
+  it("rejects a forged finish while a hunter remains unresolved", () => {
+    const state = inPhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: "seat-6", resumePhase: PHASES.NIGHT_WOLF },
+    });
+    dead(state, "seat-6", ["EXILED"]);
+    for (const seatId of ["seat-4", "seat-5", "seat-7"]) dead(state, seatId);
+    expectCode("INVALID_EVENT", () => evolve(state, validEvent(state, EVENTS.GAME_FINISHED, {
+      winner: TEAMS.WEREWOLF,
+      reason: "WEREWOLF_PARITY",
+    })));
+  });
+
   it("rejects unknown private actions and non-array replay", () => {
     const state = initial();
     expectCode("INVALID_EVENT", () => evolve(state, validEvent(state, EVENTS.PRIVATE_ACTION_RECORDED, { actionType: "UNKNOWN" })));
     expectCode("INVALID_REQUEST", () => replay(state, null));
   });
 
-  it("uses safe defaults for optional event payload fields", () => {
+  it("rejects omitted required event payload fields", () => {
     const lobby = initial();
     expectCode("INVALID_EVENT", () => evolve(lobby, { ...validEvent(lobby, EVENTS.GAME_STARTED), payload: undefined }));
 
-    const speech = inPhase(PHASES.DAY_SPEECH, { speechOrder: ["seat-1"], speechIndex: 0 });
+    const speech = inPhase(PHASES.DAY_SPEECH, { speechOrder: seats.map((seat) => seat.seatId), speechIndex: 0 });
     const event = validEvent(speech, EVENTS.PHASE_CHANGED, { phase: PHASES.DAY_SPEECH, round: 1 });
-    const next = evolve(speech, event);
-    assert.deepEqual(next.speechOrder, ["seat-1"]);
-    assert.equal(next.speechIndex, 0);
-    assert.equal(next.deadlineAt, null);
+    expectCode("INVALID_EVENT", () => evolve(speech, event));
 
     const reveal = started();
     const noDeadline = apply(reveal, COMMANDS.PHASE_TIMEOUT, undefined, {}, { trusted: true, deadlineAt: null });

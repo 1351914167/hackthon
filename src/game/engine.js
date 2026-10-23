@@ -1,5 +1,7 @@
 "use strict";
 
+const { isDeepStrictEqual } = require("node:util");
+
 const SCHEMA_VERSION = 1;
 const RULESET_ID = "standard-9-v1";
 
@@ -12,6 +14,7 @@ const PHASES = Object.freeze({
   DAWN_RESOLUTION: "DAWN_RESOLUTION",
   DAY_SPEECH: "DAY_SPEECH",
   DAY_VOTE: "DAY_VOTE",
+  LAST_WORD: "LAST_WORD",
   HUNTER_SHOT: "HUNTER_SHOT",
   GAME_OVER: "GAME_OVER",
 });
@@ -37,6 +40,7 @@ const COMMANDS = Object.freeze({
   SEER_TARGET_SET: "SEER_TARGET_SET",
   SPEECH_FINISH: "SPEECH_FINISH",
   VOTE_CAST: "VOTE_CAST",
+  LAST_WORD_FINISH: "LAST_WORD_FINISH",
   HUNTER_SHOT_SET: "HUNTER_SHOT_SET",
   PHASE_TIMEOUT: "PHASE_TIMEOUT",
 });
@@ -73,6 +77,7 @@ const TIMED_PHASES = new Set([
   PHASES.NIGHT_SEER,
   PHASES.DAY_SPEECH,
   PHASES.DAY_VOTE,
+  PHASES.LAST_WORD,
   PHASES.HUNTER_SHOT,
 ]);
 
@@ -84,7 +89,8 @@ const PHASE_TRANSITIONS = Object.freeze({
   [PHASES.NIGHT_SEER]: new Set([PHASES.DAWN_RESOLUTION]),
   [PHASES.DAWN_RESOLUTION]: new Set([PHASES.DAY_SPEECH, PHASES.HUNTER_SHOT]),
   [PHASES.DAY_SPEECH]: new Set([PHASES.DAY_SPEECH, PHASES.DAY_VOTE]),
-  [PHASES.DAY_VOTE]: new Set([PHASES.NIGHT_WOLF, PHASES.HUNTER_SHOT]),
+  [PHASES.DAY_VOTE]: new Set([PHASES.NIGHT_WOLF, PHASES.LAST_WORD]),
+  [PHASES.LAST_WORD]: new Set([PHASES.NIGHT_WOLF, PHASES.HUNTER_SHOT]),
   [PHASES.HUNTER_SHOT]: new Set([PHASES.NIGHT_WOLF, PHASES.DAY_SPEECH]),
   [PHASES.GAME_OVER]: new Set(),
 });
@@ -106,6 +112,7 @@ function clone(value) {
 }
 
 function roleTeam(role) {
+  if (!ROLE_DECK.includes(role)) fail("INVALID_STATE", "Unknown role");
   return role === ROLES.WEREWOLF ? TEAMS.WEREWOLF : TEAMS.GOOD;
 }
 
@@ -113,13 +120,18 @@ function sortedSeatIds(seats) {
   return seats.map((seat) => seat.seatId).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
 }
 
-function createInitialState({ roomId, gameId, hostSeatId, seats, rulesetId = RULESET_ID }) {
-  if (!roomId || !gameId || !hostSeatId || rulesetId !== RULESET_ID || !Array.isArray(seats) || seats.length !== 9) {
+function createInitialState(input) {
+  if (!isRecord(input)) fail("INVALID_REQUEST", "Initial game input must be an object");
+  const { roomId, gameId, hostSeatId, seats, rulesetId = RULESET_ID } = input;
+  if (!isSafeId(roomId) || !isSafeId(gameId) || !isSafeId(hostSeatId) || rulesetId !== RULESET_ID ||
+      !Array.isArray(seats) || seats.length !== 9) {
     fail("INVALID_REQUEST", "A standard-9 game requires room, game, host, and exactly nine seats");
   }
-
+  if (!isSafeId(hostSeatId) || seats.some((seat) => !isRecord(seat))) {
+    fail("INVALID_REQUEST", "Host and seats must use valid objects and identifiers");
+  }
   const seatIds = seats.map((seat) => seat.seatId);
-  if (seatIds.some((seatId) => typeof seatId !== "string" || !seatId) || new Set(seatIds).size !== 9) {
+  if (seatIds.some((seatId) => !isSafeId(seatId)) || new Set(seatIds).size !== 9) {
     fail("INVALID_REQUEST", "Seat identifiers must be nine unique non-empty strings");
   }
   if (!seatIds.includes(hostSeatId)) fail("INVALID_REQUEST", "Host must occupy a seat");
@@ -131,6 +143,7 @@ function createInitialState({ roomId, gameId, hostSeatId, seats, rulesetId = RUL
     gameId,
     hostSeatId,
     phase: PHASES.LOBBY,
+    started: false,
     round: 0,
     seq: 0,
     deadlineAt: null,
@@ -144,7 +157,10 @@ function createInitialState({ roomId, gameId, hostSeatId, seats, rulesetId = RUL
     votes: {},
     voteHistory: [],
     deaths: [],
+    pendingLastWord: null,
     pendingHunter: null,
+    hunterShotTarget: null,
+    hunterResolved: false,
     winner: null,
     finishReason: null,
   };
@@ -153,11 +169,25 @@ function createInitialState({ roomId, gameId, hostSeatId, seats, rulesetId = RUL
 }
 
 function assertInvariant(state) {
-  if (!state || state.schemaVersion !== SCHEMA_VERSION || state.rulesetId !== RULESET_ID) {
+  if (!isRecord(state) || state.schemaVersion !== SCHEMA_VERSION || state.rulesetId !== RULESET_ID) {
     fail("INVALID_STATE", "Unsupported state schema or ruleset");
   }
-  if (!Object.values(PHASES).includes(state.phase) || !Number.isInteger(state.seq) || state.seq < 0) {
+  if (!Object.values(PHASES).includes(state.phase) || typeof state.started !== "boolean" ||
+      typeof state.hunterResolved !== "boolean" ||
+      !isSafeId(state.roomId) || !isSafeId(state.gameId) || !isSafeId(state.hostSeatId) ||
+      !Number.isInteger(state.seq) || state.seq < 0 ||
+      !Number.isInteger(state.round) || state.round < 0 ||
+      (state.deadlineAt !== null && (typeof state.deadlineAt !== "string" || !state.deadlineAt))) {
     fail("INVALID_STATE", "State phase and sequence must be valid");
+  }
+  if (!Array.isArray(state.seats) || !isRecord(state.roles) || !isRecord(state.witchInventory) ||
+      !isRecord(state.night) || !isRecord(state.night.wolfTargets) || !isRecord(state.votes) ||
+      !Array.isArray(state.seerResults) || !Array.isArray(state.speechOrder) || !Array.isArray(state.voteHistory) ||
+      !Array.isArray(state.deaths)) {
+    fail("INVALID_STATE", "State collections are malformed");
+  }
+  if (state.seats.some((seat) => !isRecord(seat) || !isSafeId(seat.seatId))) {
+    fail("INVALID_STATE", "Seats must contain safe identifiers");
   }
   const seatIds = state.seats.map((seat) => seat.seatId);
   if (state.seats.length !== 9 || new Set(seatIds).size !== 9 || !seatIds.includes(state.hostSeatId)) {
@@ -181,16 +211,75 @@ function assertInvariant(state) {
       fail("INVALID_STATE", "Started games must retain the standard role deck");
     }
   }
+  if ((state.phase !== PHASES.LOBBY || assignments.length > 0) && !state.started) {
+    fail("INVALID_STATE", "Started state marker is inconsistent");
+  }
 
+  const optionalSeatIds = [state.night.wolfAttackTarget, state.night.seerTarget];
+  if (optionalSeatIds.some((seatId) => seatId !== null && !seatIds.includes(seatId)) ||
+      (state.night.witchAction !== null && !isRecord(state.night.witchAction)) ||
+      state.speechOrder.some((seatId) => !seatIds.includes(seatId)) ||
+      new Set(state.speechOrder).size !== state.speechOrder.length ||
+      (state.speechIndex !== null && (!Number.isInteger(state.speechIndex) || state.speechIndex < 0))) {
+    fail("INVALID_STATE", "Turn and night state are malformed");
+  }
+
+  if (state.deaths.some((death) => !isRecord(death) || !seatIds.includes(death.seatId) ||
+      !Array.isArray(death.reasons) || !death.reasons.length || !Number.isInteger(death.round) || death.round < 1)) {
+    fail("INVALID_STATE", "Death records are malformed");
+  }
   const deathSeatIds = state.deaths.map((death) => death.seatId);
   if (new Set(deathSeatIds).size !== deathSeatIds.length) fail("INVALID_STATE", "A player may die only once");
   for (const seat of state.seats) {
     if (seat.alive === deathSeatIds.includes(seat.seatId)) fail("INVALID_STATE", "Alive flags must agree with deaths");
   }
-  if ((state.phase === PHASES.GAME_OVER) !== Boolean(state.winner)) {
+  if ((state.phase === PHASES.GAME_OVER) !== Boolean(state.winner) ||
+      (state.winner !== null && !Object.values(TEAMS).includes(state.winner))) {
     fail("INVALID_STATE", "Only completed games have a winner");
   }
+  if ((state.phase === PHASES.LAST_WORD) !== Boolean(state.pendingLastWord)) {
+    fail("INVALID_STATE", "Only the last-word phase has a pending last word");
+  }
+  if ((state.phase === PHASES.HUNTER_SHOT) !== Boolean(state.pendingHunter)) {
+    fail("INVALID_STATE", "Only the hunter phase has a pending hunter");
+  }
+  if (state.hunterShotTarget !== null && state.phase !== PHASES.HUNTER_SHOT) {
+    fail("INVALID_STATE", "A hunter target exists only during the hunter phase");
+  }
+  if (state.hunterResolved && state.phase !== PHASES.HUNTER_SHOT) {
+    fail("INVALID_STATE", "Hunter resolution proof exists only during the hunter phase");
+  }
+  if (state.pendingLastWord && (!isRecord(state.pendingLastWord) || !seatIds.includes(state.pendingLastWord.seatId) ||
+      typeof state.pendingLastWord.hunterEligible !== "boolean" || isLivingSeat(state, state.pendingLastWord.seatId) ||
+      state.pendingLastWord.hunterEligible !== (state.roles[state.pendingLastWord.seatId] === ROLES.HUNTER) ||
+      !state.deaths.find((death) => death.seatId === state.pendingLastWord.seatId)?.reasons.includes("EXILED"))) {
+    fail("INVALID_STATE", "Pending last word is malformed");
+  }
+  if (state.pendingHunter && (!isRecord(state.pendingHunter) || state.roles[state.pendingHunter.seatId] !== ROLES.HUNTER ||
+      isLivingSeat(state, state.pendingHunter.seatId) ||
+      ![PHASES.DAY_SPEECH, PHASES.NIGHT_WOLF].includes(state.pendingHunter.resumePhase))) {
+    fail("INVALID_STATE", "Pending hunter is malformed");
+  }
+  if (state.hunterShotTarget !== null && (!isSafeId(state.hunterShotTarget) ||
+      !state.seats.some((seat) => seat.seatId === state.hunterShotTarget))) {
+    fail("INVALID_STATE", "Hunter target is malformed");
+  }
+  for (const dictionary of [state.night.wolfTargets, state.votes]) {
+    if (Object.entries(dictionary).some(([actorSeatId, targetSeatId]) =>
+      !seatIds.includes(actorSeatId) || (targetSeatId !== null && !seatIds.includes(targetSeatId)))) {
+      fail("INVALID_STATE", "Action dictionaries reference unknown seats");
+    }
+  }
   return true;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSafeId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value) &&
+    value !== "constructor" && value !== "prototype" && value !== "__proto__";
 }
 
 function requireSeat(state, seatId) {
@@ -324,6 +413,12 @@ function decide(state, command, context = {}) {
       emit(EVENTS.VOTE_RECORDED, { voterSeatId: command.actorSeatId, targetSeatId });
       break;
     }
+    case COMMANDS.LAST_WORD_FINISH: {
+      requirePhase(draft, PHASES.LAST_WORD);
+      if (draft.pendingLastWord.seatId !== command.actorSeatId) fail("ACTION_NOT_ALLOWED", "Only the exiled player can finish the last word");
+      finishLastWord(draft, emit, changePhase);
+      break;
+    }
     case COMMANDS.HUNTER_SHOT_SET: {
       requirePhase(draft, PHASES.HUNTER_SHOT);
       if (!draft.pendingHunter || draft.pendingHunter.seatId !== command.actorSeatId) {
@@ -411,7 +506,16 @@ function handleTimeout(state, emit, changePhase) {
     case PHASES.DAY_VOTE:
       resolveVote(state, emit, changePhase);
       return;
+    case PHASES.LAST_WORD:
+      finishLastWord(state, emit, changePhase);
+      return;
     case PHASES.HUNTER_SHOT:
+      emit(EVENTS.PRIVATE_ACTION_RECORDED, {
+        actionType: COMMANDS.HUNTER_SHOT_SET,
+        actorSeatId: state.pendingHunter.seatId,
+        targetSeatId: null,
+        timedOut: true,
+      });
       finishResolution(state, emit, changePhase);
       return;
   }
@@ -452,6 +556,21 @@ function resolveNight(state, emit, changePhase) {
 }
 
 function resolveVote(state, emit, changePhase) {
+  const result = buildVoteResult(state);
+  const { exiledSeatId } = result;
+  emit(EVENTS.VOTE_RESULT_REVEALED, result);
+  if (exiledSeatId) emit(EVENTS.PLAYER_DIED, { seatId: exiledSeatId, reasons: ["EXILED"], round: state.round });
+
+  if (exiledSeatId) {
+    changePhase(PHASES.LAST_WORD, {
+      pendingLastWord: { seatId: exiledSeatId, hunterEligible: state.roles[exiledSeatId] === ROLES.HUNTER },
+    });
+  } else {
+    finishResolution(state, emit, changePhase, PHASES.NIGHT_WOLF);
+  }
+}
+
+function buildVoteResult(state) {
   const counts = new Map();
   for (const targetSeatId of Object.values(state.votes)) {
     if (targetSeatId) counts.set(targetSeatId, (counts.get(targetSeatId) || 0) + 1);
@@ -469,15 +588,17 @@ function resolveVote(state, emit, changePhase) {
     }
   }
   if (tied) exiledSeatId = null;
-
   const ballots = sortedSeatIds(state.seats)
     .filter((seatId) => state.seats.find((seat) => seat.seatId === seatId).alive)
     .map((voterSeatId) => ({ voterSeatId, targetSeatId: state.votes[voterSeatId] ?? null }));
-  emit(EVENTS.VOTE_RESULT_REVEALED, { round: state.round, ballots, exiledSeatId });
-  if (exiledSeatId) emit(EVENTS.PLAYER_DIED, { seatId: exiledSeatId, reasons: ["EXILED"], round: state.round });
+  return { round: state.round, ballots, exiledSeatId };
+}
 
-  if (exiledSeatId && state.roles[exiledSeatId] === ROLES.HUNTER) {
-    changePhase(PHASES.HUNTER_SHOT, { pendingHunter: { seatId: exiledSeatId, resumePhase: PHASES.NIGHT_WOLF } });
+function finishLastWord(state, emit, changePhase) {
+  if (state.pendingLastWord.hunterEligible) {
+    changePhase(PHASES.HUNTER_SHOT, {
+      pendingHunter: { seatId: state.pendingLastWord.seatId, resumePhase: PHASES.NIGHT_WOLF },
+    });
   } else {
     finishResolution(state, emit, changePhase, PHASES.NIGHT_WOLF);
   }
@@ -537,24 +658,33 @@ function resolveWolfTarget(state) {
 
 function evolve(state, event) {
   assertInvariant(state);
-  if (!event || event.schemaVersion !== SCHEMA_VERSION || event.gameId !== state.gameId || event.seq !== state.seq + 1 ||
+  if (!isRecord(event) || event.schemaVersion !== SCHEMA_VERSION || event.gameId !== state.gameId || event.seq !== state.seq + 1 ||
       typeof event.eventId !== "string" || !event.eventId || typeof event.at !== "string" || !event.at ||
-      typeof event.causationId !== "string" || !event.causationId || !Object.values(EVENTS).includes(event.type)) {
+      typeof event.causationId !== "string" || !event.causationId || !Object.values(EVENTS).includes(event.type) ||
+      !isRecord(event.payload)) {
     fail("INVALID_EVENT", "Event envelope, version, type, or sequence is invalid");
   }
 
   const next = clone(state);
   next.seq = event.seq;
-  const payload = event.payload || {};
+  const payload = event.payload;
   switch (event.type) {
     case EVENTS.GAME_STARTED:
-      if (next.phase !== PHASES.LOBBY || payload.rulesetId !== RULESET_ID) fail("INVALID_EVENT", "GAME_STARTED is invalid here");
+      if (next.phase !== PHASES.LOBBY || next.started || payload.rulesetId !== RULESET_ID ||
+          !isDeepEqual(payload.seatIds, sortedSeatIds(next.seats)) || Object.keys(next.roles).length !== 0) {
+        fail("INVALID_EVENT", "GAME_STARTED is invalid here");
+      }
+      next.started = true;
       break;
     case EVENTS.ROLE_ASSIGNED:
-      if (next.phase !== PHASES.LOBBY || next.roles[payload.seatId] || !next.seats.some((seat) => seat.seatId === payload.seatId) ||
+      if (next.phase !== PHASES.LOBBY || !next.started || Object.hasOwn(next.roles, payload.seatId) || !isSafeId(payload.seatId) ||
+          !next.seats.some((seat) => seat.seatId === payload.seatId) ||
           !ROLE_DECK.includes(payload.role) || payload.team !== roleTeam(payload.role)) {
         fail("INVALID_EVENT", "ROLE_ASSIGNED payload is invalid");
       }
+      const assignedCount = Object.values(next.roles).filter((role) => role === payload.role).length;
+      const allowedCount = ROLE_DECK.filter((role) => role === payload.role).length;
+      if (assignedCount >= allowedCount) fail("INVALID_EVENT", "ROLE_ASSIGNED exceeds the role deck");
       next.roles[payload.seatId] = payload.role;
       break;
     case EVENTS.PRIVATE_ACTION_RECORDED:
@@ -574,7 +704,9 @@ function evolve(state, event) {
       break;
     case EVENTS.PLAYER_DIED: {
       const seat = next.seats.find((candidate) => candidate.seatId === payload.seatId);
-      if (!seat || !seat.alive || !Array.isArray(payload.reasons) || !payload.reasons.length) fail("INVALID_EVENT", "PLAYER_DIED payload is invalid");
+      if (!seat || !seat.alive || payload.round !== next.round || !isValidDeath(next, payload)) {
+        fail("INVALID_EVENT", "PLAYER_DIED payload is invalid");
+      }
       seat.alive = false;
       next.deaths.push(clone(payload));
       break;
@@ -587,7 +719,7 @@ function evolve(state, event) {
       next.votes[payload.voterSeatId] = payload.targetSeatId;
       break;
     case EVENTS.VOTE_RESULT_REVEALED:
-      if (next.phase !== PHASES.DAY_VOTE || !Array.isArray(payload.ballots) || payload.round !== next.round) {
+      if (next.phase !== PHASES.DAY_VOTE || !isDeepEqual(payload, buildVoteResult(next))) {
         fail("INVALID_EVENT", "VOTE_RESULT_REVEALED payload is invalid");
       }
       next.voteHistory.push(clone(payload));
@@ -595,7 +727,11 @@ function evolve(state, event) {
     case EVENTS.GAME_FINISHED:
       const outcome = determineWinner(next);
       if (!outcome || payload.winner !== outcome.winner || payload.reason !== outcome.reason ||
-          ![PHASES.DAWN_RESOLUTION, PHASES.DAY_VOTE, PHASES.HUNTER_SHOT].includes(next.phase)) {
+          ![PHASES.DAWN_RESOLUTION, PHASES.DAY_VOTE, PHASES.LAST_WORD, PHASES.HUNTER_SHOT].includes(next.phase) ||
+          (next.phase === PHASES.HUNTER_SHOT && !next.hunterResolved) ||
+          (next.phase === PHASES.DAWN_RESOLUTION && hasShootableHunterDeath(next)) ||
+          (next.phase === PHASES.DAY_VOTE && Boolean(next.voteHistory.at(-1)?.exiledSeatId)) ||
+          (next.phase === PHASES.LAST_WORD && next.pendingLastWord?.hunterEligible)) {
         fail("INVALID_EVENT", "GAME_FINISHED payload is invalid");
       }
       consumeDawnPotion(next);
@@ -603,7 +739,10 @@ function evolve(state, event) {
       next.finishReason = payload.reason;
       next.phase = PHASES.GAME_OVER;
       next.deadlineAt = null;
+      next.pendingLastWord = null;
       next.pendingHunter = null;
+      next.hunterShotTarget = null;
+      next.hunterResolved = false;
       break;
     case EVENTS.ROLES_REVEALED:
       if (next.phase !== PHASES.GAME_OVER || !sameRoleMap(payload.roles, next.roles)) {
@@ -626,6 +765,7 @@ function sameRoleMap(left, right) {
 }
 
 function evolvePrivateAction(state, payload) {
+  validatePrivateActionEvent(state, payload);
   switch (payload.actionType) {
     case COMMANDS.ROOM_READY_SET:
       state.seats.find((seat) => seat.seatId === payload.actorSeatId).ready = payload.ready;
@@ -640,11 +780,95 @@ function evolvePrivateAction(state, payload) {
       state.night.seerTarget = payload.targetSeatId;
       return;
     case COMMANDS.HUNTER_SHOT_SET:
-      state.pendingHunter = null;
+      state.hunterShotTarget = payload.targetSeatId;
+      state.hunterResolved = true;
+      return;
+  }
+}
+
+function validatePrivateActionEvent(state, payload) {
+  const actor = state.seats.find((seat) => seat.seatId === payload.actorSeatId);
+  switch (payload.actionType) {
+    case COMMANDS.ROOM_READY_SET:
+      if (state.phase !== PHASES.LOBBY || state.started || !actor || typeof payload.ready !== "boolean") {
+        fail("INVALID_EVENT", "Ready action event is invalid");
+      }
+      return;
+    case COMMANDS.WOLF_TARGET_SET:
+      if (state.phase !== PHASES.NIGHT_WOLF || !actor?.alive || state.roles[payload.actorSeatId] !== ROLES.WEREWOLF ||
+          !isValidOptionalTarget(state, payload.actorSeatId, payload.targetSeatId)) {
+        fail("INVALID_EVENT", "Wolf action event is invalid");
+      }
+      return;
+    case COMMANDS.WITCH_ACTION_SET:
+      if (state.phase !== PHASES.NIGHT_WITCH || !actor?.alive || state.roles[payload.actorSeatId] !== ROLES.WITCH ||
+          !isValidWitchEventAction(state, payload.actorSeatId, payload.action)) {
+        fail("INVALID_EVENT", "Witch action event is invalid");
+      }
+      return;
+    case COMMANDS.SEER_TARGET_SET:
+      if (state.phase !== PHASES.NIGHT_SEER || !actor?.alive || state.roles[payload.actorSeatId] !== ROLES.SEER ||
+          !isValidRequiredTarget(state, payload.actorSeatId, payload.targetSeatId)) {
+        fail("INVALID_EVENT", "Seer action event is invalid");
+      }
+      return;
+    case COMMANDS.HUNTER_SHOT_SET:
+      if (state.phase !== PHASES.HUNTER_SHOT || state.pendingHunter?.seatId !== payload.actorSeatId ||
+          !isValidOptionalTarget(state, payload.actorSeatId, payload.targetSeatId)) {
+        fail("INVALID_EVENT", "Hunter action event is invalid");
+      }
       return;
     default:
       fail("INVALID_EVENT", "Unknown private action type");
   }
+}
+
+function isValidRequiredTarget(state, actorSeatId, targetSeatId) {
+  return isSafeId(targetSeatId) && targetSeatId !== actorSeatId && isLivingSeat(state, targetSeatId);
+}
+
+function isValidOptionalTarget(state, actorSeatId, targetSeatId) {
+  return targetSeatId === null || isValidRequiredTarget(state, actorSeatId, targetSeatId);
+}
+
+function isValidWitchEventAction(state, witchSeatId, action) {
+  if (!isRecord(action) || !["SAVE", "POISON", "SKIP"].includes(action.kind)) return false;
+  if (action.kind === "SKIP") return Object.keys(action).length === 1;
+  if (action.kind === "SAVE") {
+    return state.witchInventory.antidote === 1 && Boolean(state.night.wolfAttackTarget) &&
+      action.targetSeatId === state.night.wolfAttackTarget &&
+      (action.targetSeatId !== witchSeatId || state.round === 1);
+  }
+  return state.witchInventory.poison === 1 && isValidRequiredTarget(state, witchSeatId, action.targetSeatId);
+}
+
+function isValidDeath(state, payload) {
+  if (!Array.isArray(payload.reasons) || payload.reasons.length === 0 ||
+      new Set(payload.reasons).size !== payload.reasons.length) return false;
+  if (state.phase === PHASES.DAWN_RESOLUTION) {
+    return isDeepEqual(payload.reasons, expectedNightDeathReasons(state, payload.seatId));
+  }
+  if (state.phase === PHASES.DAY_VOTE) {
+    return isDeepEqual(payload.reasons, ["EXILED"]) && state.voteHistory.at(-1)?.exiledSeatId === payload.seatId;
+  }
+  if (state.phase === PHASES.HUNTER_SHOT) {
+    return isDeepEqual(payload.reasons, ["HUNTER_SHOT"]) && state.hunterShotTarget === payload.seatId;
+  }
+  return false;
+}
+
+function expectedNightDeathReasons(state, seatId) {
+  const reasons = [];
+  const savedSeatId = state.night.witchAction?.kind === "SAVE" ? state.night.witchAction.targetSeatId : null;
+  if (state.night.wolfAttackTarget === seatId && savedSeatId !== seatId) reasons.push("WOLF_ATTACK");
+  if (state.night.witchAction?.kind === "POISON" && state.night.witchAction.targetSeatId === seatId) reasons.push("WITCH_POISON");
+  return reasons;
+}
+
+function hasShootableHunterDeath(state) {
+  const hunterSeatId = roleSeatId(state, ROLES.HUNTER);
+  const death = state.deaths.find((candidate) => candidate.seatId === hunterSeatId && candidate.round === state.round);
+  return Boolean(death?.reasons.includes("WOLF_ATTACK") && !death.reasons.includes("WITCH_POISON"));
 }
 
 function evolvePhaseChanged(state, payload) {
@@ -653,6 +877,7 @@ function evolvePhaseChanged(state, payload) {
   }
   const previousPhase = state.phase;
   if (!PHASE_TRANSITIONS[previousPhase].has(payload.phase)) fail("INVALID_EVENT", "Phase transition is not allowed");
+  validatePhasePayload(state, payload);
   if (payload.phase === PHASES.ROLE_REVEAL) {
     const roles = Object.values(state.roles).sort();
     const expected = [...ROLE_DECK].sort();
@@ -673,11 +898,86 @@ function evolvePhaseChanged(state, payload) {
     state.speechIndex = payload.speechIndex ?? 0;
   }
   if (payload.phase === PHASES.DAY_VOTE) state.votes = {};
+  if (payload.phase === PHASES.LAST_WORD) state.pendingLastWord = clone(payload.pendingLastWord);
   if (payload.phase === PHASES.HUNTER_SHOT) state.pendingHunter = clone(payload.pendingHunter);
+  if (previousPhase === PHASES.LAST_WORD && payload.phase !== PHASES.LAST_WORD) state.pendingLastWord = null;
   if (previousPhase === PHASES.HUNTER_SHOT && payload.phase !== PHASES.HUNTER_SHOT) state.pendingHunter = null;
+  if (previousPhase === PHASES.HUNTER_SHOT && payload.phase !== PHASES.HUNTER_SHOT) state.hunterShotTarget = null;
+  if (previousPhase === PHASES.HUNTER_SHOT && payload.phase !== PHASES.HUNTER_SHOT) state.hunterResolved = false;
   state.phase = payload.phase;
   state.round = payload.round;
   state.deadlineAt = payload.deadlineAt ?? null;
+}
+
+function validatePhasePayload(state, payload) {
+  if (payload.deadlineAt !== null && (typeof payload.deadlineAt !== "string" || !payload.deadlineAt)) {
+    fail("INVALID_EVENT", "Phase deadline must be a non-empty string or null");
+  }
+  const previousPhase = state.phase;
+  let expectedRound = state.round;
+  if (previousPhase === PHASES.ROLE_REVEAL && payload.phase === PHASES.NIGHT_WOLF) expectedRound = 1;
+  if (payload.phase === PHASES.NIGHT_WOLF && previousPhase !== PHASES.ROLE_REVEAL) expectedRound = state.round + 1;
+  if (payload.round !== expectedRound) fail("INVALID_EVENT", "Phase round is inconsistent");
+  if (payload.phase === PHASES.DAY_SPEECH) {
+    const expectedOrder = sortedSeatIds(state.seats).filter((seatId) => isLivingSeat(state, seatId));
+    const expectedIndex = previousPhase === PHASES.DAY_SPEECH ? state.speechIndex + 1 : 0;
+    if (expectedIndex >= expectedOrder.length || !Array.isArray(payload.speechOrder) || !isDeepEqual(payload.speechOrder, expectedOrder) ||
+        payload.speechIndex !== expectedIndex || payload.currentSpeakerSeatId !== expectedOrder[expectedIndex]) {
+      fail("INVALID_EVENT", "Speech phase payload is inconsistent");
+    }
+    if (previousPhase === PHASES.HUNTER_SHOT && state.pendingHunter?.resumePhase !== PHASES.DAY_SPEECH) {
+      fail("INVALID_EVENT", "Hunter resolution cannot resume at daytime speech");
+    }
+    if (previousPhase === PHASES.HUNTER_SHOT && !state.hunterResolved) {
+      fail("INVALID_EVENT", "Hunter must resolve before daytime resumes");
+    }
+    if (previousPhase === PHASES.DAWN_RESOLUTION && hasShootableHunterDeath(state)) {
+      fail("INVALID_EVENT", "A shootable hunter must act before daytime speech");
+    }
+  }
+  if (payload.phase === PHASES.DAY_VOTE && state.speechIndex !== state.speechOrder.length - 1) {
+    fail("INVALID_EVENT", "Voting can start only after the final speech");
+  }
+  if (payload.phase === PHASES.LAST_WORD) {
+    const exiledSeatId = state.voteHistory.at(-1)?.exiledSeatId;
+    const expected = { seatId: exiledSeatId, hunterEligible: state.roles[exiledSeatId] === ROLES.HUNTER };
+    if (!exiledSeatId || !isDeepEqual(payload.pendingLastWord, expected)) fail("INVALID_EVENT", "Last-word payload is inconsistent");
+  }
+  if (payload.phase === PHASES.HUNTER_SHOT) {
+    const expectedSeatId = previousPhase === PHASES.DAWN_RESOLUTION
+      ? roleSeatId(state, ROLES.HUNTER)
+      : state.pendingLastWord?.seatId;
+    const expectedResume = previousPhase === PHASES.DAWN_RESOLUTION ? PHASES.DAY_SPEECH : PHASES.NIGHT_WOLF;
+    if (!isDeepEqual(payload.pendingHunter, { seatId: expectedSeatId, resumePhase: expectedResume })) {
+      fail("INVALID_EVENT", "Hunter phase payload is inconsistent");
+    }
+    if (previousPhase === PHASES.DAWN_RESOLUTION) {
+      const death = state.deaths.find((candidate) => candidate.seatId === expectedSeatId);
+      if (!death?.reasons.includes("WOLF_ATTACK") || death.reasons.includes("WITCH_POISON")) {
+        fail("INVALID_EVENT", "Hunter was not killed by a shootable cause");
+      }
+    } else if (!state.pendingLastWord?.hunterEligible) {
+      fail("INVALID_EVENT", "The exiled player is not an eligible hunter");
+    }
+  }
+  if (payload.phase === PHASES.NIGHT_WOLF) {
+    if (previousPhase === PHASES.DAY_VOTE && state.voteHistory.at(-1)?.exiledSeatId) {
+      fail("INVALID_EVENT", "An exiled player must receive a last word");
+    }
+    if (previousPhase === PHASES.LAST_WORD && state.pendingLastWord?.hunterEligible) {
+      fail("INVALID_EVENT", "An eligible hunter must act after the last word");
+    }
+    if (previousPhase === PHASES.HUNTER_SHOT && state.pendingHunter?.resumePhase !== PHASES.NIGHT_WOLF) {
+      fail("INVALID_EVENT", "Hunter resolution cannot resume at night");
+    }
+    if (previousPhase === PHASES.HUNTER_SHOT && !state.hunterResolved) {
+      fail("INVALID_EVENT", "Hunter must resolve before night resumes");
+    }
+  }
+}
+
+function isDeepEqual(left, right) {
+  return isDeepStrictEqual(left, right);
 }
 
 function consumeDawnPotion(state) {
