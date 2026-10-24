@@ -67,7 +67,13 @@
         onTrack(event) {
           if (!remoteVoice || !event.streams?.[0]) return;
           remoteVoice.srcObject = event.streams[0];
-          remoteVoice.play().catch(() => {});
+          remoteVoice.play().then(() => {
+            remoteVoice.controls = false;
+            remoteVoice.classList.remove("needs-playback");
+          }).catch(() => {
+            remoteVoice.controls = true;
+            remoteVoice.classList.add("needs-playback");
+          });
         },
         onStateChange: handlers.onStateChange,
         onError: handlers.onError,

@@ -17,14 +17,8 @@
     const URLApi = options.URL;
     const subtle = options.crypto?.subtle;
     const now = options.now || Date.now;
-    let recorder = null;
-    let stream = null;
-    let chunks = [];
+    let activeSession = null;
     let status = "idle";
-    let stopPromise = null;
-    let resolveStop = null;
-    let rejectStop = null;
-    let startedAt = 0;
     const listeners = new Set();
 
     function notify(next) {
@@ -32,9 +26,24 @@
       for (const listener of listeners) listener(status);
     }
 
-    function releaseStream() {
-      stream?.getTracks?.().forEach((track) => track.stop());
-      stream = null;
+    function releaseStream(session) {
+      stopStream(session.stream);
+      session.stream = null;
+    }
+
+    function stopStream(value) {
+      value?.getTracks?.().forEach((track) => track.stop());
+    }
+
+    function cancellationError() {
+      return new Error("录音已取消");
+    }
+
+    function settleCancelled(session) {
+      session.rejectStop?.(cancellationError());
+      session.resolveStop = null;
+      session.rejectStop = null;
+      session.stopPromise = null;
     }
 
     function subscribe(listener) {
@@ -46,64 +55,114 @@
     async function start() {
       if (status !== "idle") throw new Error("录音设备正忙");
       if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) throw new Error("当前浏览器不支持录音");
+      const session = {
+        cancelled: false,
+        stream: null,
+        recorder: null,
+        chunks: [],
+        startedAt: 0,
+        stopPromise: null,
+        resolveStop: null,
+        rejectStop: null,
+        cancelStart: null,
+      };
+      activeSession = session;
       notify("requesting");
       try {
-        stream = await mediaDevices.getUserMedia({ audio: true });
-        chunks = [];
+        const pendingMedia = Promise.resolve().then(() => mediaDevices.getUserMedia({ audio: true }));
+        const result = await Promise.race([
+          pendingMedia.then((value) => ({ stream: value })),
+          new Promise((resolve) => { session.cancelStart = () => resolve({ cancelled: true }); }),
+        ]);
+        session.cancelStart = null;
+        if (result.cancelled) {
+          pendingMedia.then(stopStream, () => {});
+          throw cancellationError();
+        }
+        session.stream = result.stream;
+        if (session.cancelled || activeSession !== session) {
+          releaseStream(session);
+          throw cancellationError();
+        }
         const preferred = "audio/webm;codecs=opus";
         const config = MediaRecorderCtor.isTypeSupported?.(preferred) ? { mimeType: preferred } : undefined;
-        recorder = new MediaRecorderCtor(stream, config);
-        recorder.addEventListener("dataavailable", (event) => {
-          if (event.data?.size) chunks.push(event.data);
+        session.recorder = new MediaRecorderCtor(session.stream, config);
+        const currentRecorder = session.recorder;
+        currentRecorder.addEventListener("dataavailable", (event) => {
+          if (!session.cancelled && activeSession === session && event.data?.size) session.chunks.push(event.data);
         });
-        recorder.addEventListener("stop", () => {
-          const type = recorder.mimeType || "audio/webm";
-          const blob = new BlobCtor(chunks, { type });
-          const durationMs = Math.max(1, Math.round(now() - startedAt));
-          releaseStream();
-          recorder = null;
-          chunks = [];
+        currentRecorder.addEventListener("stop", () => {
+          if (session.cancelled || activeSession !== session) {
+            releaseStream(session);
+            return;
+          }
+          const type = currentRecorder.mimeType || "audio/webm";
+          const blob = new BlobCtor(session.chunks, { type });
+          const durationMs = Math.max(1, Math.round(now() - session.startedAt));
+          activeSession = null;
+          releaseStream(session);
           notify("idle");
-          resolveStop?.({ blob, durationMs });
-          resolveStop = null;
-          rejectStop = null;
-          stopPromise = null;
+          session.resolveStop?.({ blob, durationMs });
+          session.resolveStop = null;
+          session.rejectStop = null;
+          session.stopPromise = null;
         });
-        recorder.addEventListener("error", (event) => {
-          releaseStream();
-          recorder = null;
+        currentRecorder.addEventListener("error", (event) => {
+          if (session.cancelled || activeSession !== session) {
+            releaseStream(session);
+            return;
+          }
+          activeSession = null;
+          releaseStream(session);
           notify("idle");
-          rejectStop?.(event.error || new Error("录音失败"));
-          resolveStop = null;
-          rejectStop = null;
-          stopPromise = null;
+          session.rejectStop?.(event.error || new Error("录音失败"));
+          session.resolveStop = null;
+          session.rejectStop = null;
+          session.stopPromise = null;
         });
-        recorder.start();
-        startedAt = now();
+        currentRecorder.start();
+        if (session.cancelled || activeSession !== session) return;
+        session.startedAt = now();
         notify("recording");
       } catch (error) {
-        releaseStream();
-        recorder = null;
-        notify("idle");
+        releaseStream(session);
+        if (activeSession === session) {
+          activeSession = null;
+          notify("idle");
+        }
         throw error;
       }
     }
 
     function stop() {
-      if (!recorder || status !== "recording") return Promise.reject(new Error("当前没有正在进行的录音"));
+      const session = activeSession;
+      if (!session?.recorder || status !== "recording") return Promise.reject(new Error("当前没有正在进行的录音"));
       notify("processing");
-      stopPromise = new Promise((resolve, reject) => {
-        resolveStop = resolve;
-        rejectStop = reject;
+      session.stopPromise = new Promise((resolve, reject) => {
+        session.resolveStop = resolve;
+        session.rejectStop = reject;
       });
-      const pending = stopPromise;
-      recorder.stop();
+      const pending = session.stopPromise;
+      session.recorder.stop();
       return pending;
     }
 
     function cancel() {
-      if (recorder && recorder.state !== "inactive") recorder.stop();
-      else releaseStream();
+      const session = activeSession;
+      if (!session) return;
+      session.cancelled = true;
+      activeSession = null;
+      session.cancelStart?.();
+      session.cancelStart = null;
+      releaseStream(session);
+      settleCancelled(session);
+      try {
+        if (session.recorder && session.recorder.state !== "inactive") session.recorder.stop();
+      } catch {
+        // The recorder may already be transitioning to inactive.
+      } finally {
+        notify("idle");
+      }
     }
 
     async function hash(blob) {

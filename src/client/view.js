@@ -130,10 +130,12 @@
   function renderVoiceDock(model) {
     const status = model.recording ? "正在录音" : model.voiceBusy ? "上传与灵汐转写中" : model.canRecord ? "可以开始录音" : "当前不可录音";
     const live = model.liveVoice || {};
+    const liveStatus = !live.enabled ? "" : live.error ? `实时原声异常：${live.error}` : live.connected ? "实时原声已连接"
+      : live.connecting ? "实时原声连接中" : "实时已开启，等待发言或其他玩家";
     return `<div class="speak-dock">
       <div class="connection-copy"><span class="eyebrow">真实语音片段</span><strong>${status}</strong><button class="retention-toggle" type="button" data-command="toggle-retain" aria-pressed="${model.retainVoice}">赛后保留 ${model.retainVoice ? "开" : "关"}</button></div>
       <button class="mic-button${model.recording ? " is-recording" : ""}" type="button" data-command="${model.recording ? "stop-recording" : "start-recording"}" aria-pressed="${model.recording}"${(!model.canRecord && !model.recording) || model.voiceBusy ? " disabled" : ""}><span aria-hidden="true">●</span><span>${model.recording ? "停止" : "录音"}</span></button>
-      <div class="latency"><span>${live.connected ? "实时原声已连接" : escapeHtml(model.voiceStatus?.label || "字幕不可用")}</span>${live.supported ? `<button class="retention-toggle" type="button" data-command="toggle-live-voice" aria-pressed="${Boolean(live.enabled)}">${live.enabled ? "关闭实时" : "开启实时"}</button>` : ""}</div>
+      <div class="latency"><span role="status">${escapeHtml(liveStatus || model.voiceStatus?.label || "字幕不可用")}</span>${live.supported ? `<button class="retention-toggle" type="button" data-command="toggle-live-voice" aria-pressed="${Boolean(live.enabled)}">${live.enabled ? "关闭实时" : "开启实时"}</button>` : ""}</div>
     </div>`;
   }
 
@@ -157,7 +159,7 @@
       const speaker = seatName(model.seats, segment.speakerSeatId || segment.seatId);
       const verification = model.verifications[id];
       const detail = segment.transcript || `${segment.phaseKey || segment.phase || "牌局"} · ${segment.size ? `${Math.ceil(segment.size / 1024)} KB` : "原声"}`;
-      return `<li><div><strong>${escapeHtml(speaker)}</strong><p>${escapeHtml(detail)}</p><small>声证 ${escapeHtml(id.slice(0, 10))}${verification ? ` · ${escapeHtml(verification)}` : ""}</small></div><div class="clip-actions"><button class="icon-button" type="button" data-command="play-voice" data-segment-id="${escapeHtml(id)}" aria-label="播放 ${escapeHtml(speaker)} 的语音">▶</button><button class="clip-mark" type="button" data-command="mark-voice" data-segment-id="${escapeHtml(id)}" data-label="${escapeHtml(model.selectedLabel)}">标记</button></div></li>`;
+      return `<li><div><strong>${escapeHtml(speaker)}</strong><p>${escapeHtml(detail)}</p><small>声证 ${escapeHtml(id.slice(0, 10))}${verification ? ` · ${escapeHtml(verification)}` : ""}</small></div><div class="clip-actions"><button class="icon-button" type="button" data-command="play-voice" data-segment-id="${escapeHtml(id)}" aria-label="播放 ${escapeHtml(speaker)} 的语音">▶</button><button class="clip-mark" type="button" data-command="mark-voice" data-segment-id="${escapeHtml(id)}" data-label="${escapeHtml(model.selectedLabel)}">标记</button>${segment.speakerSeatId === model.self.seatId ? `<button class="clip-mark" type="button" data-command="remove-voice" data-segment-id="${escapeHtml(id)}"${model.busy ? " disabled" : ""}>清理本人原声</button>` : ""}</div></li>`;
     }).join("")}</ul>`;
   }
 

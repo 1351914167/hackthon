@@ -49,6 +49,7 @@ function setup(config = {}) {
     uploadVoice: async (...args) => { calls.push({ upload: args }); return config.uploadSegment === undefined ? ({ segmentId: "clip", transcript: "发言" }) : config.uploadSegment; },
     getVoice: async () => new Blob(["audio"]),
     markVoice: async () => ({}),
+    removeVoice: async (...args) => { calls.push({ removeVoice: args }); return { removed: true }; },
     getRecap: async () => { if (config.recapError) throw config.recapError; return { gameId: "g1", winner: "GOOD", roles: [], votes: [], deaths: [], turningPoints: [], segments: [], marks: [] }; },
     narration: async () => { calls.push("narration"); if (config.narrationError) throw config.narrationError; return new Blob(["host"]); },
     createReport: async (roomId, token, targetSeatId, reason) => {
@@ -281,14 +282,25 @@ describe("client app", () => {
     assert.equal(peerCalls.length, 0);
     await h.app.handle("toggle-live-voice");
     assert.deepEqual(peerCalls.slice(0, 3), ["r1", "start", "v1"]);
-    handlers.onStateChange({ started: true, connectionCount: 2 });
+    handlers.onStateChange({ started: true, connectionCount: 2, connectedPeerCount: 0, connectingPeerCount: 2 });
+    assert.equal(h.app.getState().liveVoice.connected, false);
+    assert.equal(h.app.getState().liveVoice.connecting, true);
+    handlers.onStateChange({ started: true, connectionCount: 2, connectedPeerCount: 2, connectingPeerCount: 0 });
     assert.equal(h.app.getState().liveVoice.connected, true);
     handlers.onStateChange({ started: false, connectionCount: 0 });
     assert.equal(h.app.getState().liveVoice.connected, false);
     handlers.onError(new Error("nat"));
     assert.equal(h.app.getState().liveVoice.connected, false);
+    handlers.onStateChange({ started: true, connectedPeerCount: 0, connectingPeerCount: 1 });
+    assert.equal(h.app.getState().liveVoice.error, "nat");
+    handlers.onStateChange({ started: true, connectedPeerCount: 1, connectingPeerCount: 0 });
+    assert.equal(h.app.getState().liveVoice.error, "");
     await h.app.handle("toggle-live-voice");
     assert.equal(peerCalls.includes("stop"), true);
+    handlers.onStateChange({ started: true, connectedPeerCount: 1 });
+    handlers.onError(new Error("stale peer"));
+    assert.equal(h.app.getState().liveVoice.connected, false);
+    assert.equal(h.app.getState().liveVoice.error, "");
 
     const lobby = setup({ createPeer: () => peer });
     await lobby.app.start();
@@ -377,6 +389,137 @@ describe("client app", () => {
     await h.app.handle("toggle-live-voice");
     assert.equal(h.app.getState().liveVoice.enabled, false);
     h.app.dispose();
+  });
+
+  it("serializes peer startup and discards callbacks after disabling during permission prompts", async () => {
+    let release;
+    const pending = new Promise((resolve) => { release = resolve; });
+    const calls = [];
+    let callbacks;
+    const h = setup({ room: room(game("DAY_SPEECH", [])), createPeer(session, handlers) {
+      callbacks = handlers;
+      calls.push("create");
+      return { start: () => pending, stop: async () => calls.push("stop"), updateRoomSnapshot: async (snapshot) => calls.push(snapshot.version) };
+    } });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "等待麦克风" });
+    const enabling = h.app.handle("toggle-live-voice");
+    await new Promise((resolve) => setImmediate(resolve));
+    h.stream().onSnapshot(room(game("DAY_SPEECH", []), "v2"));
+    h.stream().onSnapshot(room(game("DAY_SPEECH", []), "v3"));
+    assert.deepEqual(calls, ["create", "v2", "v3"]);
+    await h.app.handle("toggle-live-voice");
+    callbacks.onError(new Error("stale"));
+    release();
+    await enabling;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ["create", "v2", "v3", "stop"]);
+    assert.equal(h.app.getState().liveVoice.enabled, false);
+    assert.equal(h.app.getState().liveVoice.error, "");
+    h.app.dispose();
+  });
+
+  it("retries a failed peer with a new instance and stops media when the game finishes", async () => {
+    let attempts = 0;
+    const calls = [];
+    let failFirst;
+    const h = setup({ room: room(game("DAY_SPEECH", [])), createPeer() {
+      const attempt = ++attempts;
+      return { start: async () => {
+        calls.push(`start-${attempt}`);
+        if (attempt === 1) await new Promise((resolve, reject) => { failFirst = reject; });
+      }, stop: async () => calls.push(`stop-${attempt}`), updateRoomSnapshot: async (snapshot) => calls.push(snapshot.version) };
+    } });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "重试原声" });
+    const enabling = h.app.handle("toggle-live-voice");
+    await new Promise((resolve) => setImmediate(resolve));
+    failFirst(new Error("first join failed"));
+    await enabling;
+    assert.match(h.app.getState().liveVoice.error, /first join failed/);
+    h.stream().onSnapshot(room(game("DAY_SPEECH", []), "v2"));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ["start-1", "stop-1", "start-2", "v2"]);
+    h.stream().onSnapshot({ ...room(game("GAME_OVER", []), "done"), status: "FINISHED" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.app.getState().liveVoice.enabled, false);
+    assert.equal(calls.at(-1), "stop-2");
+    await h.app.handle("toggle-live-voice");
+    assert.equal(attempts, 2);
+    h.app.dispose();
+  });
+
+  it("surfaces pending topology errors and ignores late failures after closing the microphone", async () => {
+    let failStart;
+    const calls = [];
+    const h = setup({ room: room(game("DAY_SPEECH", [])), createPeer() {
+      return { start: () => new Promise((resolve, reject) => { failStart = reject; }),
+        stop: async () => calls.push("stop"), updateRoomSnapshot: async () => { throw new Error("topology unavailable"); } };
+    } });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "网络异常" });
+    const enabling = h.app.handle("toggle-live-voice");
+    await new Promise((resolve) => setImmediate(resolve));
+    h.stream().onSnapshot(room(game("DAY_SPEECH", []), "v2"));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.app.getState().liveVoice.error, "topology unavailable");
+    await h.app.handle("toggle-live-voice");
+    failStart(new Error("late permission denial"));
+    await enabling;
+    assert.equal(h.app.getState().liveVoice.enabled, false);
+    assert.equal(h.app.getState().liveVoice.error, "");
+    assert.deepEqual(calls, ["stop"]);
+    h.app.dispose();
+
+    const failedFactory = setup({ room: room(game("DAY_SPEECH", [])), createPeer() { throw new Error("WebRTC unsupported"); } });
+    await failedFactory.app.start();
+    await failedFactory.app.handle("create-room", { nickname: "旧浏览器" });
+    await failedFactory.app.handle("toggle-live-voice");
+    assert.equal(failedFactory.app.getState().liveVoice.error, "WebRTC unsupported");
+    failedFactory.app.dispose();
+  });
+
+  it("cancels clip capture on speaker, phase, round, or game changes but not private snapshot updates", async () => {
+    const h = setup({ room: room(game("DAY_SPEECH", ["SPEECH_FINISH"])) });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "正在发言" });
+    await h.app.handle("start-recording");
+    h.stream().onSnapshot(room(game("DAY_SPEECH", ["SPEECH_FINISH"]), "private-update"));
+    assert.equal(h.calls.filter((call) => call === "cancel").length, 0);
+    const changedSpeaker = { ...game("DAY_SPEECH", []), currentSpeakerSeatId: "s2" };
+    h.stream().onSnapshot(room(changedSpeaker, "speaker"));
+    assert.equal(h.calls.filter((call) => call === "cancel").length, 1);
+    h.stream().onSnapshot(room(game("DAY_VOTE", []), "vote"));
+    h.stream().onSnapshot(room({ ...game("DAY_VOTE", []), round: 2 }, "round"));
+    h.stream().onSnapshot(room({ ...game("DAY_VOTE", []), gameId: "g2" }, "new-game"));
+    h.stream().onSnapshot(room(null, "lobby"));
+    assert.equal(h.calls.filter((call) => call === "cancel").length, 5);
+    h.app.dispose();
+  });
+
+  it("cleans the player's own voice and refreshes the finished recap without deleting another seat's clips", async () => {
+    const h = setup({ room: room(game("DAY_SPEECH", [])), segments: [
+      { segmentId: "mine", speakerSeatId: "s1", sha256: "hash" }, { segmentId: "theirs", speakerSeatId: "s2" },
+    ] });
+    await h.app.start();
+    await h.app.handle("create-room", { nickname: "声证清理" });
+    await h.app.handle("remove-voice", { segmentId: "theirs" });
+    assert.match(h.app.getState().error, /只能清理本人/);
+    await h.app.handle("play-voice", { segmentId: "mine" });
+    await h.app.handle("remove-voice", { segmentId: "mine" });
+    assert.deepEqual(h.calls.find((item) => item.removeVoice).removeVoice, ["r1", "token", "mine"]);
+    assert.deepEqual(h.app.getState().segments.map((item) => item.segmentId), ["theirs"]);
+    assert.equal(h.app.getState().verifications.mine, undefined);
+    await h.app.handle("remove-voice", { segmentId: "missing" });
+    h.app.dispose();
+
+    const done = setup({ room: room(game("GAME_OVER", [])), segments: [{ segmentId: "retained", speakerSeatId: "s1" }] });
+    await done.app.start();
+    await done.app.handle("create-room", { nickname: "赛后清理" });
+    await done.app.handle("remove-voice", { segmentId: "retained" });
+    assert.equal(done.app.getState().recap.gameId, "g1");
+    assert.deepEqual(done.app.getState().segments, []);
+    done.app.dispose();
   });
 
   it("submits a controlled report and exposes report records only to the host drawer", async () => {

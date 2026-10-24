@@ -39,7 +39,7 @@ it("closes the repository when runtime configuration is invalid", () => {
   fs.rmSync(directory, { recursive: true });
 });
 
-it("uses environment defaults and authenticates voice routes", async () => {
+it("uses environment defaults and authenticates voice and realtime media routes", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wuyin-default-"));
   const priorFile = process.env.DATA_FILE;
   const priorIce = process.env.ICE_SERVERS;
@@ -54,6 +54,8 @@ it("uses environment defaults and authenticates voice routes", async () => {
   assert.equal(handled, true);
   assert.equal(reply.status, 200);
   await assert.rejects(runtime.extension({ url: new URL("http://localhost/api/rooms/ROOM1/voice"), request: { method: "POST" },
+    token: () => { throw Object.assign(new Error("no token"), { code: "INVALID_SEAT_TOKEN" }); } }), { code: "INVALID_SEAT_TOKEN" });
+  await assert.rejects(runtime.extension({ url: new URL("http://localhost/api/media/join"), request: { method: "POST" },
     token: () => { throw Object.assign(new Error("no token"), { code: "INVALID_SEAT_TOKEN" }); } }), { code: "INVALID_SEAT_TOKEN" });
   runtime.close();
   if (priorFile === undefined) delete process.env.DATA_FILE; else process.env.DATA_FILE = priorFile;

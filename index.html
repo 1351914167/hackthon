@@ -35,7 +35,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div class="alert-region" id="alertRegion" role="alert" aria-live="assertive"></div>
-    <audio id="remoteVoice" class="remote-voice" autoplay></audio>
+    <audio id="remoteVoice" class="remote-voice" aria-label="实时原声播放；自动播放受限时请点击播放" autoplay></audio>
 
     <dialog class="rules-dialog" id="rulesDialog" aria-labelledby="rulesTitle">
       <div class="dialog-header">
@@ -58,6 +58,7 @@
     <script src="./src/client/voice.js" defer></script>
     <script src="./src/client/view.js" defer></script>
     <script src="./src/client/app.js" defer></script>
+    <script src="./src/media/peer-client.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>
