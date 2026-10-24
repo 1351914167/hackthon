@@ -17,8 +17,8 @@
 | H2 完整可玩界面 | 服务端快照驱动大厅/圆桌、所有角色操作、投票遗言、猎人、结束与重开、响应式和键盘 | [PR #3](https://github.com/1351914167/hackthon/pull/3)，已合并，quality 通过 |
 | H3–H4 声证特色 | 鉴权原声片段、灵汐适配、摘要回听、私人标记、显式留存、可解析事实复盘 | [PR #4](https://github.com/1351914167/hackthon/pull/4)，已合并，quality 通过 |
 | E1 恢复与治理 | SQLite v1、原子快照与幂等、备份恢复、私有文件、TTL/删除、房间举报与房主视图 | 同 PR #4；恢复、失败回滚和权限测试通过 |
-| E2 实时原声 | 原生 WebRTC、同源鉴权信令、当前发言者发送、换麦回收、可配置 ICE、片段降级 | 最终实时媒体 PR；本地八接收者 RTP 与换麦验收通过 |
-| E3 工程交付 | 产品与运维文档、Docker/Compose、真实 Chrome CI、全量覆盖与运行包 | 同最终 PR；远端 quality/browser/container 为合并门禁 |
+| E2 实时原声 | 原生 WebRTC、同源鉴权信令、当前发言者发送、换麦回收、可配置 ICE、片段降级 | [PR #5](https://github.com/1351914167/hackthon/pull/5)；本地八接收者 RTP、换麦与异常恢复验收通过 |
+| E3 工程交付 | 产品与运维文档、Docker/Compose、真实 Chrome CI、全量覆盖与运行包 | 同 [PR #5](https://github.com/1351914167/hackthon/pull/5)；远端 quality/browser/container 为合并门禁 |
 
 H3/H4/E1 在一个互相依赖的纵向 PR 中整合，分别保留实现和文档提交；没有通过直接推 main 绕过审查。最终 PR 合并并且三项 CI 全部通过后发布仓库内交付版本。
 
