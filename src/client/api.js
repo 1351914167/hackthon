@@ -155,6 +155,10 @@
       return postJson(`/api/rooms/${encodeURIComponent(roomId)}/voice/${encodeURIComponent(segmentId)}/mark`, { label }, authHeaders(token));
     }
 
+    function removeVoice(roomId, token, segmentId) {
+      return postJson(`/api/rooms/${encodeURIComponent(roomId)}/voice/${encodeURIComponent(segmentId)}/remove`, {}, authHeaders(token));
+    }
+
     function getRecap(roomId, token) {
       return json(`/api/rooms/${encodeURIComponent(roomId)}/recap`, { headers: authHeaders(token) });
     }
@@ -217,6 +221,7 @@
       listReports,
       markVoice,
       narration,
+      removeVoice,
       roomCommand,
       streamRoom,
       uploadVoice,

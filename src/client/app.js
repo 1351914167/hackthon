@@ -42,6 +42,9 @@
     const createPeer = options.createPeer;
     let stream = null;
     let peer = null;
+    let peerEpoch = 0;
+    let peerSync = Promise.resolve();
+    let startingPeer = null;
     let timer = null;
     let lastNarrationKey = "";
     let disposed = false;
@@ -60,7 +63,7 @@
       verifications: {},
       pendingIntent: null,
       retainVoice: false,
-      liveVoice: { supported: Boolean(createPeer), enabled: false, connected: false, error: "" },
+      liveVoice: { supported: Boolean(createPeer), enabled: false, connected: false, connecting: false, error: "" },
       reportReason: "不当发言，请房主核查",
       reports: [],
       reportsOpen: false,
@@ -85,6 +88,10 @@
 
     function updateSnapshot(snapshot) {
       if (!snapshot || !snapshot.roomId || !snapshot.version) return false;
+      const previous = state.snapshot?.game;
+      const next = snapshot.game;
+      if (previous && (previous.gameId !== next?.gameId || previous.phase !== next.phase ||
+          previous.round !== next.round || previous.currentSpeakerSeatId !== next.currentSpeakerSeatId)) voice.cancel();
       state.snapshot = snapshot;
       state.error = "";
       const nextGameId = snapshot.game?.gameId || null;
@@ -101,37 +108,68 @@
       return true;
     }
 
-    async function syncPeer(snapshot) {
+    function syncPeer(snapshot) {
+      if (!snapshot?.game || snapshot.game.phase === "GAME_OVER") return stopPeer();
+      const epoch = peerEpoch;
+      if (peer && peer === startingPeer) {
+        const active = peer;
+        return active.updateRoomSnapshot(snapshot).catch((error) => {
+          if (epoch !== peerEpoch || peer !== active) return;
+          state.liveVoice = { ...state.liveVoice, connected: false, connecting: false, error: error.message };
+          render();
+        });
+      }
+      peerSync = peerSync.then(() => performPeerSync(epoch));
+      return peerSync;
+    }
+
+    async function performPeerSync(epoch) {
       const session = sessionStore.read();
-      if (!state.liveVoice.enabled || !snapshot?.game || !session || !createPeer) return;
+      if (disposed || epoch !== peerEpoch || !state.liveVoice.enabled || !session || !createPeer) return;
+      let active = peer;
       try {
-        if (!peer) {
-          peer = createPeer(session, {
+        if (!active) {
+          active = createPeer(session, {
             onStateChange(peerState) {
-              state.liveVoice = { ...state.liveVoice, connected: peerState.started && peerState.connectionCount > 0, peerState, error: "" };
+              if (peer !== active || epoch !== peerEpoch || disposed) return;
+              const connected = peerState.started && peerState.connectedPeerCount > 0;
+              state.liveVoice = { ...state.liveVoice, connected, connecting: peerState.started && peerState.connectingPeerCount > 0,
+                peerState, error: connected ? "" : state.liveVoice.error };
               render();
             },
             onError(error) {
-              state.liveVoice = { ...state.liveVoice, connected: false, error: error.message };
+              if (peer !== active || epoch !== peerEpoch || disposed) return;
+              state.liveVoice = { ...state.liveVoice, connected: false, connecting: false, error: error.message };
               render();
             },
           });
-          await peer.start();
+          peer = active;
+          startingPeer = active;
+          try { await active.start(); } finally { if (startingPeer === active) startingPeer = null; }
         }
-        await peer.updateRoomSnapshot(snapshot);
+        if (epoch !== peerEpoch || peer !== active || disposed) return;
+        await active.updateRoomSnapshot(state.snapshot);
       } catch (error) {
-        state.liveVoice = { ...state.liveVoice, connected: false, error: error.message };
+        if (active && peer === active) {
+          peer = null;
+          try { await active.stop(); } catch { /* Keep the startup error visible. */ }
+        }
+        if (epoch !== peerEpoch || disposed) return;
+        state.liveVoice = { ...state.liveVoice, connected: false, connecting: false, error: error.message };
         render();
       }
     }
 
     async function stopPeer() {
+      peerEpoch += 1;
+      peerSync = Promise.resolve();
       const active = peer;
       peer = null;
+      startingPeer = null;
+      state.liveVoice = { ...state.liveVoice, connected: false, connecting: false, enabled: false, error: "" };
       if (active) {
         try { await active.stop(); } catch { /* Clip recording remains available. */ }
       }
-      state.liveVoice = { ...state.liveVoice, connected: false, enabled: false };
     }
 
     async function requestNarration(snapshot) {
@@ -362,7 +400,7 @@
         return;
       }
       if (command === "toggle-live-voice") {
-        if (!state.snapshot?.game) {
+        if (!state.snapshot?.game || state.snapshot.game.phase === "GAME_OVER") {
           view.showToast("牌局开始后可开启实时原声");
           return;
         }
@@ -390,6 +428,7 @@
           await roomCommand("leave");
           stream?.close();
           await stopPeer();
+          voice.cancel();
           sessionStore.clear();
           state.snapshot = null;
           state.segments = [];
@@ -407,6 +446,16 @@
           const session = sessionStore.read();
           await api.markVoice(session.roomId, session.seatToken, data.segmentId, data.label);
           view.showToast("声证标记已保存");
+        } else if (command === "remove-voice") {
+          const session = sessionStore.read();
+          const segment = state.segments.find((item) => item.segmentId === data.segmentId);
+          if (!session || !segment || segment.speakerSeatId !== state.snapshot.selfSeatId) throw new Error("只能清理本人原声片段");
+          await api.removeVoice(session.roomId, session.seatToken, data.segmentId);
+          state.segments = state.segments.filter((item) => item.segmentId !== data.segmentId);
+          delete state.verifications[data.segmentId];
+          state.recap = null;
+          if (state.snapshot.game.phase === "GAME_OVER") await loadRecap();
+          view.showToast("本人原声已清理");
         } else if (command === "submit-report") {
           const session = sessionStore.read();
           const reason = String(data.reason || state.reportReason).trim();
@@ -433,7 +482,7 @@
     function dispose() {
       disposed = true;
       stream?.close();
-      peer?.stop().catch(() => {});
+      stopPeer();
       voice.cancel();
       clearIntervalFn(timer);
     }

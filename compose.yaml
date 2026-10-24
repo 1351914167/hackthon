@@ -1,0 +1,44 @@
+services:
+  wuyin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wuyin-werewolf:local
+    init: true
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      DATA_FILE: /app/data/wuyin.sqlite
+      LINGXI_API_KEY: "${LINGXI_API_KEY:-}"
+      ICE_SERVERS: "${ICE_SERVERS:-[]}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://127.0.0.1:4173}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      NPM_CONFIG_CACHE: /tmp/npm
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    ports:
+      - "127.0.0.1:4173:4173"
+    volumes:
+      - wuyin-data:/app/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4173/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 20s
+
+volumes:
+  wuyin-data:

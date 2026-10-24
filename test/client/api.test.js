@@ -94,6 +94,14 @@ describe("client api", () => {
     assert.equal(calls[1].init.headers.Authorization, "Bearer seat-token");
   });
 
+  it("removes only an authenticated voice reference using the explicit remove endpoint", async () => {
+    const { api, calls } = harness(() => response({ removed: true }));
+    await api.removeVoice("room 1", "seat-token", "clip:one");
+    assert.equal(calls[0].url, "/api/rooms/room%201/voice/clip%3Aone/remove");
+    assert.equal(calls[0].init.headers.Authorization, "Bearer seat-token");
+    assert.equal(calls[0].init.method, "POST");
+  });
+
   it("normalizes JSON and non-JSON request errors", async () => {
     const first = harness(() => response({ error: { code: "ROOM_FULL", message: "满员" } }, 409)).api;
     await assert.rejects(() => first.createRoom("x", "i"), (error) => error instanceof ApiError && error.code === "ROOM_FULL" && error.status === 409);

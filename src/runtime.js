@@ -6,6 +6,8 @@ const { createSqliteRepository } = require("./persistence");
 const { createPersistentRooms } = require("./persistence/room-repository");
 const { createLingxiGateway } = require("./voice");
 const { createFeatureRoutes } = require("./features");
+const { createMediaBroker, parseIceServersFromEnv } = require("./media");
+const { createMediaRoutes } = require("./media/routes");
 
 function createRuntime(options = {}) {
   const clock = options.clock || Date.now;
@@ -17,7 +19,11 @@ function createRuntime(options = {}) {
     const gateway = options.gateway || createLingxiGateway({ apiKey: process.env.LINGXI_API_KEY || "" });
     const features = createFeatureRoutes({ rooms, gateway, repository, clock,
       mediaDirectory: options.mediaDirectory || path.join(path.dirname(filename), "media") });
-    return { rooms, clock, extension: features, close: () => repository.close(), repository };
+    const broker = createMediaBroker({ getSnapshot: rooms.getSnapshot, clock,
+      iceServers: options.iceServers || parseIceServersFromEnv(process.env.ICE_SERVERS || "[]") });
+    const media = createMediaRoutes({ broker });
+    const extension = async (context) => await features(context) || await media(context);
+    return { rooms, clock, extension, close: () => repository.close(), repository };
   } catch (error) {
     repository.close();
     throw error;

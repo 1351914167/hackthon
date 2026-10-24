@@ -9,10 +9,10 @@
   "scripts": {
     "start": "node -e \"require('./server').start()\"",
     "test": "node --test --test-concurrency=1 test/*/*.test.js",
+    "test:browser": "playwright test --config=test/browser/playwright.config.cjs",
     "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage', {recursive:true})\" && node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/coverage-inventory.cjs' --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=95 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info test/*/*.test.js && node scripts/coverage-inventory.cjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "v8-to-istanbul": "^9.3.0"
+    "@playwright/test": "^1.64.1"
   }
 }

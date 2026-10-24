@@ -17,6 +17,33 @@ class Recorder {
   }
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function mediaStream(name) {
+  const track = { name, stopped: false, stop() { this.stopped = true; } };
+  return { stream: { name, getTracks: () => [track] }, track };
+}
+
+function controllerFor(mediaDevices, MediaRecorderCtor) {
+  return createVoiceController({
+    mediaDevices,
+    MediaRecorder: MediaRecorderCtor,
+    Blob,
+    Audio: class {},
+    URL: {},
+    crypto: webcrypto,
+    now: () => 100,
+  });
+}
+
 function setup(overrides = {}) {
   const track = { stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track] };
@@ -66,6 +93,7 @@ describe("voice controller", () => {
     await active.start();
     await assert.rejects(() => active.start(), /正忙/);
     active.cancel();
+    assert.equal(active.getStatus(), "idle");
   });
 
   it("hashes and plays authenticated blobs while always releasing object URLs", async () => {
@@ -110,5 +138,133 @@ describe("voice controller", () => {
     const failed = setup({ MediaRecorder: ErrorRecorder }).controller;
     await failed.start();
     await assert.rejects(() => failed.stop(), /device lost/);
+  });
+
+  it("cancels a pending permission request and stops a late stream without recording", async () => {
+    const permission = deferred();
+    const late = mediaStream("late");
+    let recorderCount = 0;
+    class CountingRecorder extends Recorder {
+      constructor(...args) { super(...args); recorderCount += 1; }
+    }
+    const controller = controllerFor({ getUserMedia: () => permission.promise }, CountingRecorder);
+    const states = [];
+    controller.subscribe((state) => states.push(state));
+    const starting = controller.start();
+    assert.equal(controller.getStatus(), "requesting");
+    const cancelled = assert.rejects(() => starting, /已取消/);
+    controller.cancel();
+    assert.equal(controller.getStatus(), "idle");
+    await cancelled;
+    assert.equal(recorderCount, 0);
+    permission.resolve(late.stream);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(late.track.stopped, true);
+    assert.deepEqual(states, ["idle", "requesting", "idle"]);
+  });
+
+  it("does not let a cancelled permission request overwrite a newer recording", async () => {
+    const firstPermission = deferred();
+    const secondPermission = deferred();
+    const oldMedia = mediaStream("old");
+    const currentMedia = mediaStream("current");
+    let calls = 0;
+    const controller = controllerFor({ getUserMedia: () => (++calls === 1 ? firstPermission.promise : secondPermission.promise) }, Recorder);
+
+    const firstStart = controller.start();
+    controller.cancel();
+    await assert.rejects(() => firstStart, /已取消/);
+    const secondStart = controller.start();
+    secondPermission.resolve(currentMedia.stream);
+    await secondStart;
+    assert.equal(controller.getStatus(), "recording");
+
+    firstPermission.resolve(oldMedia.stream);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(oldMedia.track.stopped, true);
+    assert.equal(currentMedia.track.stopped, false);
+    assert.equal(controller.getStatus(), "recording");
+    controller.cancel();
+    assert.equal(currentMedia.track.stopped, true);
+  });
+
+  it("ignores late events from an old recorder after a new session starts", async () => {
+    class DelayedRecorder {
+      static instances = [];
+      static isTypeSupported() { return true; }
+      constructor(stream, config) {
+        this.stream = stream;
+        this.mimeType = config.mimeType;
+        this.listeners = {};
+        this.state = "inactive";
+        DelayedRecorder.instances.push(this);
+      }
+      addEventListener(name, callback) { this.listeners[name] = callback; }
+      start() { this.state = "recording"; }
+      stop() { this.state = "inactive"; }
+      data(text) { this.listeners.dataavailable({ data: new Blob([text], { type: this.mimeType }) }); }
+      finish() { this.listeners.stop(); }
+      fail(error) { this.listeners.error({ error }); }
+    }
+    const firstMedia = mediaStream("first");
+    const secondMedia = mediaStream("second");
+    let calls = 0;
+    const controller = controllerFor({ getUserMedia: async () => (++calls === 1 ? firstMedia.stream : secondMedia.stream) }, DelayedRecorder);
+
+    await controller.start();
+    const firstRecorder = DelayedRecorder.instances[0];
+    const firstStop = controller.stop();
+    const cancelledStop = assert.rejects(() => firstStop, /已取消/);
+    controller.cancel();
+    await cancelledStop;
+    assert.equal(firstMedia.track.stopped, true);
+
+    await controller.start();
+    const secondRecorder = DelayedRecorder.instances[1];
+    firstRecorder.data("old");
+    firstRecorder.finish();
+    firstRecorder.fail(new Error("old recorder error"));
+    assert.equal(controller.getStatus(), "recording");
+    assert.equal(secondMedia.track.stopped, false);
+
+    const secondStop = controller.stop();
+    secondRecorder.data("new");
+    secondRecorder.finish();
+    const recording = await secondStop;
+    assert.equal(await recording.blob.text(), "new");
+    assert.equal(secondMedia.track.stopped, true);
+    assert.equal(controller.getStatus(), "idle");
+  });
+
+  it("handles reentrant cancellation, recorder stop failures, and errors without details", async () => {
+    const reentrantMedia = mediaStream("reentrant");
+    let reentrantController;
+    class ReentrantRecorder extends Recorder {
+      start() {
+        super.start();
+        reentrantController.cancel();
+      }
+    }
+    reentrantController = controllerFor({ getUserMedia: async () => reentrantMedia.stream }, ReentrantRecorder);
+    await reentrantController.start();
+    assert.equal(reentrantController.getStatus(), "idle");
+    assert.equal(reentrantMedia.track.stopped, true);
+
+    const throwingMedia = mediaStream("throwing");
+    class ThrowingStopRecorder extends Recorder {
+      stop() { throw new Error("already stopping"); }
+    }
+    const throwingController = controllerFor({ getUserMedia: async () => throwingMedia.stream }, ThrowingStopRecorder);
+    await throwingController.start();
+    assert.doesNotThrow(() => throwingController.cancel());
+    assert.equal(throwingController.getStatus(), "idle");
+    assert.equal(throwingMedia.track.stopped, true);
+
+    class EmptyErrorRecorder extends Recorder {
+      stop() { this.state = "inactive"; this.listeners.error({}); }
+    }
+    const emptyError = controllerFor({ getUserMedia: async () => mediaStream("error").stream }, EmptyErrorRecorder);
+    await emptyError.start();
+    await assert.rejects(() => emptyError.stop(), /录音失败/);
   });
 });

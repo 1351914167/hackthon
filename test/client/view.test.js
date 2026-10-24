@@ -35,6 +35,21 @@ function baseModel() {
 }
 
 describe("client view", () => {
+  it("shows real media connection progress and errors without claiming connected early", () => {
+    const model = baseModel();
+    model.liveVoice = { supported: true, enabled: true, connected: false, connecting: true, error: "" };
+    assert.match(renderGame(model), /实时原声连接中/);
+    assert.doesNotMatch(renderGame(model), /实时原声已连接/);
+    model.liveVoice.error = "ICE <failed>";
+    assert.match(renderGame(model), /实时原声异常：ICE &lt;failed&gt;/);
+    model.liveVoice = { ...model.liveVoice, error: "", connecting: false };
+    assert.match(renderGame(model), /等待发言或其他玩家/);
+    model.liveVoice.connected = true;
+    assert.match(renderGame(model), /实时原声已连接/);
+    model.liveVoice.enabled = false;
+    assert.match(renderGame(model), /灵汐在线/);
+    assert.match(renderGame(model), /开启实时/);
+  });
   it("escapes untrusted names and renders actual entry/lobby states", () => {
     assert.equal(escapeHtml("<a 'x'>&\""), "&lt;a &#39;x&#39;&gt;&amp;&quot;");
     const entry = renderEntry({ roomHint: "<ROOM>", busy: false, error: "失败 <x>" });
@@ -56,6 +71,12 @@ describe("client view", () => {
     assert.match(witch, /查看举报/);
     assert.match(witch, /不自动处罚/);
     assert.doesNotMatch(witch, /<青岚>/);
+    const ownClip = baseModel();
+    ownClip.self.seatId = "s2";
+    assert.match(renderGame(ownClip), /清理本人原声/);
+    ownClip.busy = true;
+    assert.match(renderGame(ownClip), /data-command="remove-voice"[^>]+disabled/);
+    assert.doesNotMatch(witch, /清理本人原声/);
 
     for (const [type, text] of [["WOLF_TARGET_SET", "确认狼刀"], ["SEER_TARGET_SET", "确认查验"], ["VOTE_CAST", "确认投票"], ["HUNTER_SHOT_SET", "确认开枪"]]) {
       const model = baseModel();

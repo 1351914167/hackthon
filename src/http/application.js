@@ -250,7 +250,7 @@ function start(options = {}) {
   const application = createApplication(options);
   const port = Number(options.port ?? process.env.PORT ?? 4173);
   const host = options.host || process.env.HOST || "127.0.0.1";
-  application.server.listen(port, host, () => console.log(`雾隐镇 http://${host}:${application.server.address().port}`));
+  application.server.listen(port, host);
   return application;
 }
 

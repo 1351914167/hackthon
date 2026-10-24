@@ -67,7 +67,11 @@ describe("browser bootstrap", () => {
 
   it("loads every UMD module through its browser path and boots a real room view", async () => {
     class Element {
-      constructor() { this.innerHTML = ""; this.textContent = ""; this.listeners = {}; this.classList = { toggle() {}, add() {}, remove() {} }; }
+      constructor() {
+        this.innerHTML = ""; this.textContent = ""; this.listeners = {};
+        const classes = new Set();
+        this.classList = { toggle() {}, add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) };
+      }
       addEventListener(name, callback) { this.listeners[name] = callback; }
       querySelector(selector) { return selector === "span:last-child" ? this.label : null; }
       closest() { return null; }
@@ -136,6 +140,13 @@ describe("browser bootstrap", () => {
     elements["#remoteVoice"].play = async () => { throw new Error("autoplay blocked"); };
     peerOptions.onTrack({ streams: [{ id: "blocked" }] });
     await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(elements["#remoteVoice"].controls, true);
+    assert.equal(elements["#remoteVoice"].classList.contains("needs-playback"), true);
+    elements["#remoteVoice"].play = async () => {};
+    peerOptions.onTrack({ streams: [{ id: "resumed" }] });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(elements["#remoteVoice"].controls, false);
+    assert.equal(elements["#remoteVoice"].classList.contains("needs-playback"), false);
     app.dispose();
 
     const failedAlert = new Element();
