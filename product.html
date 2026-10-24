@@ -28,17 +28,17 @@
       <section class="intro-band">
         <div class="intro-copy">
           <span class="eyebrow">VOICE SOCIAL DEDUCTION</span>
-          <h1>不是把狼人杀搬到线上，<br />而是让每一句话都成为线索。</h1>
-          <p>面向熟人开黑与轻社交组局的中文语音狼人杀。系统主持流程、灵汐承担语音智能、规则引擎保证公平，让玩家把注意力留给发言、判断与博弈。</p>
+          <h1>每一句发言，<br />留下可回听的推理证据。</h1>
+          <p>九人原声圆桌、私密声证标记、引用真实票型与行动的赛后复盘。灵汐提供字幕与主持音，确定性规则保证结算，让每一处转折都有依据。</p>
         </div>
         <div class="north-star">
           <span>北极星指标</span>
           <strong>有效完局数 / 周</strong>
-          <p>至少 6 名真人、完成胜负结算、无语音阻断的牌局。</p>
+          <p>九人开局、完成胜负结算、无语音阻断的牌局。</p>
           <div class="metric-row">
-            <div><b>9–12 人</b><small>核心局型</small></div>
+            <div><b>9 人</b><small>标准板子</small></div>
             <div><b>25–40 分</b><small>目标局长</small></div>
-            <div><b>&lt; 800 ms</b><small>转写首字</small></div>
+            <div><b>声证回听</b><small>摘要可核对</small></div>
           </div>
         </div>
       </section>
@@ -96,7 +96,7 @@
               <a href="https://github.com/xiaoxiaomugong/AI-Werewolf-Live-Voice-Game" target="_blank" rel="noreferrer">AI Werewolf ↗</a>
               <span>AI 角色与实时语音交互的单点验证</span>
               <span>AI 代替全部真人的孤立体验</span>
-              <strong>AI 只补位与主持，不决定真人对局结果</strong>
+              <strong>AI 仅转写与播报，不决定真人对局结果</strong>
             </div>
           </div>
         </div>
@@ -114,13 +114,13 @@
         </div>
 
         <div class="loop">
-          <article><span>1</span><strong>一分钟组局</strong><p>房主选择人数与标准板子，链接或房间码邀请。</p></article>
+          <article><span>1</span><strong>房间码组局</strong><p>固定九人标准板子，各标签页加入并准备。</p></article>
           <div class="arrow">→</div>
           <article><span>2</span><strong>系统主持</strong><p>发身份、控麦、计时，夜间动作按规则顺序收集。</p></article>
           <div class="arrow">→</div>
-          <article><span>3</span><strong>语音博弈</strong><p>灵汐转写关键发言，玩家做可信、存疑与查验标记。</p></article>
+          <article><span>3</span><strong>语音博弈</strong><p>实时原声与灵汐字幕，玩家私密标记真实片段。</p></article>
           <div class="arrow">→</div>
-          <article><span>4</span><strong>证据复盘</strong><p>按时间线还原查验、投票、死亡与胜负转折。</p></article>
+          <article><span>4</span><strong>证据复盘</strong><p>按真实票型、死亡和保留原声核对胜负转折。</p></article>
         </div>
 
         <div class="design-grid">
@@ -135,12 +135,12 @@
           </article>
           <article class="design-card">
             <span class="eyebrow">语音交互</span>
-            <h3>抢麦有秩序，沉默也有反馈</h3>
+            <h3>轮流发言，状态清楚</h3>
             <ul class="checklist">
-              <li>阶段级发言权：夜间静音，白天顺序麦或自由麦。</li>
-              <li>首字延迟、转写状态与失败降级始终可见。</li>
+              <li>阶段级发言权：夜间静音，白天顺序麦与遗言。</li>
+              <li>录制、上传、转写与失败状态清楚可见。</li>
               <li>AI 合成主持音明确标注，避免与真人声音混淆。</li>
-              <li>原始音频默认不落盘；复盘只保留结构化事件与经同意的转写。</li>
+              <li>原声默认临时处理，明确同意才保留回听，默认两小时到期。</li>
             </ul>
           </article>
           <article class="design-card">
@@ -150,7 +150,7 @@
               <li>客户端只收到当前玩家有权看到的角色与夜间结果。</li>
               <li>胜负、死亡、技能与票型以服务端规则状态为准。</li>
               <li>AI 只能把规则决定“说出来”，不能改写行动结果。</li>
-              <li>断线进入托管倒计时，重连后恢复本人可见快照。</li>
+              <li>断线保留席位，超时按规则推进，重连恢复本人可见快照。</li>
             </ul>
           </article>
         </div>
@@ -180,28 +180,28 @@
         <div class="architecture-map" aria-label="系统架构图">
           <div class="arch-column client-column">
             <span class="arch-label">客户端</span>
-            <div class="arch-box"><strong>Web / PWA</strong><small>牌局视图 · 麦克风 · 本地音频播放</small></div>
+            <div class="arch-box"><strong>响应式 Web</strong><small>牌局视图 · 麦克风 · 本地音频播放</small></div>
             <div class="arch-box"><strong>玩家可见状态</strong><small>仅本人的角色、技能与查验结果</small></div>
           </div>
           <div class="arch-bridge">
-            <span>HTTPS / WSS</span>
+            <span>HTTPS / SSE</span>
             <i>⇄</i>
-            <small>房间事件 · 音频帧 · 控麦指令</small>
+            <small>玩家快照 · 鉴权片段 · 媒体信令</small>
           </div>
           <div class="arch-column server-column">
             <span class="arch-label">雾隐镇服务端</span>
             <div class="arch-box key"><strong>房间与规则状态机</strong><small>阶段推进 · 技能结算 · 胜负判定</small></div>
             <div class="arch-box"><strong>权限与快照裁剪</strong><small>座位令牌 · 断线重连 · 私密信息隔离</small></div>
-            <div class="arch-box"><strong>灵汐语音网关</strong><small>密钥封装 · 限流 · 审计 · 降级</small></div>
+            <div class="arch-box"><strong>SQLite 与声证存储</strong><small>原子快照 · 重启恢复 · 授权原声留存</small></div>
           </div>
           <div class="arch-bridge accent">
-            <span>灵汐专用</span>
+            <span>媒体 / 智能</span>
             <i>⇄</i>
             <small>任何语音智能能力不接入第二供应商</small>
           </div>
           <div class="arch-column provider-column">
-            <span class="arch-label">灵汐 API</span>
-            <div class="arch-box"><strong>Realtime</strong><small>gpt-4o-realtime-preview · 实时主持</small></div>
+            <span class="arch-label">原声媒体与灵汐 API</span>
+            <div class="arch-box"><strong>WebRTC 原声媒体</strong><small>自管 P2P 信令 · 可配置 TURN · 片段降级</small></div>
             <div class="arch-box"><strong>Speech to Text</strong><small>gpt-4o-transcribe · 发言转写</small></div>
             <div class="arch-box"><strong>Text to Speech</strong><small>gpt-4o-mini-tts · 系统播报</small></div>
           </div>
@@ -211,17 +211,17 @@
           <article>
             <span class="eyebrow">调用边界</span>
             <h3>只在服务端持有灵汐密钥</h3>
-            <p>浏览器把录音或实时会话请求交给雾隐镇网关，网关再访问 <code>api.aicso.top</code>。前端永远拿不到长期密钥，日志不记录 Authorization。</p>
+            <p>浏览器将片段转写与主持音请求交给雾隐镇网关，网关再访问 <code>api.aicso.top</code>。前端拿不到灵汐长期密钥，日志不记录 Authorization。</p>
           </article>
           <article>
-            <span class="eyebrow">当前原型</span>
-            <h3>HTTP 语音闭环已预留</h3>
-            <p>本仓库可直接代理 <code>/v1/audio/transcriptions</code> 与 <code>/v1/audio/speech</code>；Realtime 生产代理需要在下一阶段补充 WSS 会话服务。</p>
+            <span class="eyebrow">真实语音链路</span>
+            <h3>原声与字幕独立运行</h3>
+            <p>WebRTC 传递当前玩家原声，同源鉴权片段提供降级回听。灵汐 STT/TTS 失败时保留原声与文字提示；AI Realtime 尚未联调，不影响当前完整牌局。</p>
           </article>
           <article>
             <span class="eyebrow">降级策略</span>
             <h3>语音失败不破坏规则</h3>
-            <p>转写与播报失败时保留文字事件和手动操作，阶段计时暂停并提示房主；规则状态机不依赖模型输出。</p>
+            <p>转写与播报失败时保留原声、文字事件和规则操作，阶段计时继续；规则状态机不依赖模型输出。</p>
           </article>
         </div>
 
@@ -231,8 +231,8 @@
             <li><span>01</span><p><strong>服务端授予发言权</strong><small>校验阶段、座位存活状态和轮次。</small></p></li>
             <li><span>02</span><p><strong>客户端采集语音</strong><small>显示录音与传输状态，不在本地长期保存。</small></p></li>
             <li><span>03</span><p><strong>灵汐转写</strong><small>网关调用 gpt-4o-transcribe，结果绑定玩家和阶段。</small></p></li>
-            <li><span>04</span><p><strong>房间广播</strong><small>发布语音状态、转写与时间线事件，观战者只读。</small></p></li>
-            <li><span>05</span><p><strong>结算复盘</strong><small>保留结构化摘要，按同意状态决定是否保留全文。</small></p></li>
+            <li><span>04</span><p><strong>授权回听</strong><small>房间成员经鉴权获取片段，浏览器验证原声摘要。</small></p></li>
+            <li><span>05</span><p><strong>结算复盘</strong><small>引用结构化事实，只有明确保留且未过期的片段可赛后回听。</small></p></li>
           </ol>
         </div>
       </section>
@@ -240,13 +240,13 @@
       <section class="section roadmap-section">
         <div class="section-title">
           <span class="index">04</span>
-          <div><span class="eyebrow">DELIVERY</span><h2>落地优先级</h2></div>
+          <div><span class="eyebrow">DELIVERY</span><h2>当前交付</h2></div>
         </div>
         <div class="roadmap">
-          <article><span>M0 · 本仓库</span><h3>体验原型</h3><p>完整牌局主视图、规则说明、推理便签、阶段切换，以及灵汐 STT/TTS 网关。</p></article>
-          <article><span>M1 · 可玩版本</span><h3>多人房间</h3><p>服务端状态机、WSS 房间事件、座位令牌、断线恢复与真实投票结算。</p></article>
-          <article><span>M2 · 语音版本</span><h3>实时控麦</h3><p>灵汐 Realtime 服务端代理、VAD、抢麦队列、主持音与转写合规留存。</p></article>
-          <article><span>M3 · 增长版本</span><h3>复盘与组局</h3><p>案件卡片、好友再来一局、可信度反馈、举报治理与局型扩展。</p></article>
+          <article><span>完整牌局</span><h3>九人可玩</h3><p>真实房间、全部角色、放逐遗言、猎人结算、断线重连和再来一局。</p></article>
+          <article><span>原声圆桌</span><h3>实时与降级</h3><p>一位发言者向八人发送 WebRTC 原声；片段回听、灵汐字幕与主持音独立降级。</p></article>
+          <article><span>特色声证</span><h3>可验证复盘</h3><p>标记真实原声、校验 SHA256、引用票型与行动。当前事实复盘不伪装成 AI 判断。</p></article>
+          <article><span>工程交付</span><h3>恢复与验收</h3><p>SQLite 事务、授权留存清理、Docker 打包、逐文件覆盖率门禁与真实 Chrome 九端验证。</p></article>
         </div>
       </section>
     </main>
